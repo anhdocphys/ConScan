@@ -8,11 +8,12 @@ import { formatBytes, formatDate, formatRelativeTime, getFileCategory } from './
 
 export class ConfluenceApiClient {
   constructor({ baseUrl = '', tabId = null, apiToken = '', username = '' } = {}) {
-    this.baseUrl = baseUrl ? baseUrl.replace(/\/+$/, '') : '';
     this.tabId = tabId;
     this.apiToken = apiToken;
     this.username = username;
     this.restBase = '';
+    this.apiBaseUrl = '';
+    this.setBaseUrl(baseUrl);
   }
 
   setTabId(tabId) {
@@ -20,7 +21,17 @@ export class ConfluenceApiClient {
   }
 
   setBaseUrl(baseUrl) {
-    this.baseUrl = baseUrl ? baseUrl.replace(/\/+$/, '') : '';
+    if (!baseUrl) {
+      this.baseUrl = '';
+      this.restBase = '';
+      return;
+    }
+    let clean = baseUrl.replace(/\/+$/, '');
+    // Ensure Atlassian Cloud domains always include /wiki
+    if (clean.includes('atlassian.net') && !clean.endsWith('/wiki')) {
+      clean += '/wiki';
+    }
+    this.baseUrl = clean;
     this.restBase = '';
   }
 
@@ -137,6 +148,9 @@ export class ConfluenceApiClient {
 
         if (ok) {
           this.restBase = cand;
+          if (cand.includes('/wiki') && !this.baseUrl.endsWith('/wiki')) {
+            this.baseUrl = this.baseUrl.replace(/\/+$/, '') + '/wiki';
+          }
           return cand;
         }
       } catch {
@@ -146,6 +160,9 @@ export class ConfluenceApiClient {
 
     // Default fallback
     this.restBase = candidates[0];
+    if (this.restBase.includes('/wiki') && !this.baseUrl.endsWith('/wiki')) {
+      this.baseUrl = this.baseUrl.replace(/\/+$/, '') + '/wiki';
+    }
     return this.restBase;
   }
 
@@ -228,7 +245,10 @@ export class ConfluenceApiClient {
     const endpoint = `/content/search?cql=${encodeURIComponent(cql)}&start=${start}&limit=${limit}&expand=version,history,space,container,metadata`;
 
     const data = await this.request(endpoint);
-    const results = (data.results || []).map((item) => this.normalizeAttachment(item));
+    if (data._links?.base) {
+      this.apiBaseUrl = data._links.base.replace(/\/+$/, '');
+    }
+    const results = (data.results || []).map((item) => this.normalizeAttachment(item, null, data._links));
 
     return {
       results,
@@ -260,8 +280,11 @@ export class ConfluenceApiClient {
     if (!this.restBase) await this.detectApiBase();
     const endpoint = `/content/${pageId}/child/attachment?limit=${limit}&start=${start}&expand=version,history,container`;
     const data = await this.request(endpoint);
+    if (data._links?.base) {
+      this.apiBaseUrl = data._links.base.replace(/\/+$/, '');
+    }
     return {
-      attachments: (data.results || []).map((item) => this.normalizeAttachment(item)),
+      attachments: (data.results || []).map((item) => this.normalizeAttachment(item, null, data._links)),
       hasMore: !!data._links?.next
     };
   }
@@ -269,7 +292,7 @@ export class ConfluenceApiClient {
   /**
    * Normalize attachment object from Confluence REST response
    */
-  normalizeAttachment(item, fallbackSpace = null) {
+  normalizeAttachment(item, fallbackSpace = null, apiLinks = null) {
     const spaceKey = item.space?.key || fallbackSpace?.key || 'UNKNOWN';
     const spaceName = item.space?.name || fallbackSpace?.name || spaceKey;
 
@@ -282,11 +305,13 @@ export class ConfluenceApiClient {
     const version = item.version || {};
     const extensions = item.extensions || {};
 
+    const linksContext = apiLinks || item._links;
+
     // Creator / Uploader determination
     const creatorObj = history.createdBy || version.by || {};
     const uploadedBy = creatorObj.displayName || creatorObj.publicName || creatorObj.username || 'Không xác định';
     const uploadedByUsername = creatorObj.username || creatorObj.accountId || '';
-    const uploaderAvatar = creatorObj.profilePicture?.path ? this.buildWebUrl(creatorObj.profilePicture.path) : '';
+    const uploaderAvatar = creatorObj.profilePicture?.path ? this.buildWebUrl(creatorObj.profilePicture.path, linksContext) : '';
 
     const uploadDate = version.when || history.createdDate || item.metadata?.createdDate || '';
     const fileSize = parseInt(extensions.fileSize || item.metadata?.fileSize || 0, 10);
@@ -308,7 +333,7 @@ export class ConfluenceApiClient {
       spaceName,
       pageId,
       pageTitle,
-      pageUrl: pageWebui ? this.buildWebUrl(pageWebui) : '',
+      pageUrl: pageWebui ? this.buildWebUrl(pageWebui, linksContext) : '',
       uploadedBy,
       uploadedByUsername,
       uploaderAvatar,
@@ -319,22 +344,62 @@ export class ConfluenceApiClient {
       formattedSize: formatBytes(fileSize),
       version: version.number || 1,
       comment: version.message || extensions.comment || '',
-      downloadUrl: downloadPath ? this.buildWebUrl(downloadPath) : '',
-      viewUrl: webuiPath ? this.buildWebUrl(webuiPath) : ''
+      downloadUrl: downloadPath ? this.buildWebUrl(downloadPath, linksContext) : '',
+      viewUrl: webuiPath ? this.buildWebUrl(webuiPath, linksContext) : ''
     };
   }
 
-  buildWebUrl(path) {
+  buildWebUrl(path, apiLinks = null) {
     if (!path) return '';
-    if (path.startsWith('http://') || path.startsWith('https://')) return path;
 
-    const base = this.baseUrl || '';
-    // If path already starts with context path or /wiki, avoid duplicate
-    if (base.endsWith('/wiki') && path.startsWith('/wiki')) {
-      const cleanOrigin = base.replace(/\/wiki$/, '');
-      return `${cleanOrigin}${path}`;
+    // Check if this instance uses /wiki context
+    const usesWiki =
+      (this.apiBaseUrl && this.apiBaseUrl.includes('/wiki')) ||
+      (this.restBase && this.restBase.includes('/wiki')) ||
+      (this.baseUrl && this.baseUrl.includes('/wiki')) ||
+      (this.baseUrl && this.baseUrl.includes('atlassian.net')) ||
+      (apiLinks?.base && apiLinks.base.includes('/wiki')) ||
+      (apiLinks?.context === '/wiki');
+
+    // Case 1: Absolute URL starting with http:// or https://
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      try {
+        const u = new URL(path);
+        // If it's an Atlassian Cloud or wiki instance, and path is missing /wiki prefix
+        if (usesWiki && !u.pathname.startsWith('/wiki/') && u.pathname !== '/wiki') {
+          u.pathname = '/wiki' + (u.pathname.startsWith('/') ? '' : '/') + u.pathname;
+          return u.toString();
+        }
+      } catch {}
+      return path;
     }
 
-    return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
+    // Determine the base origin
+    let base = this.apiBaseUrl || this.baseUrl || '';
+    let origin = '';
+    try {
+      if (base.startsWith('http://') || base.startsWith('https://')) {
+        const u = new URL(base);
+        origin = u.origin;
+      }
+    } catch {}
+
+    if (!origin) {
+      origin = base.replace(/\/wiki.*$/, '').replace(/\/+$/, '');
+    }
+
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+
+    if (usesWiki) {
+      // If path already starts with /wiki/, attach to origin directly
+      if (cleanPath.startsWith('/wiki/') || cleanPath === '/wiki') {
+        return `${origin}${cleanPath}`;
+      }
+      // Otherwise prepend /wiki
+      return `${origin}/wiki${cleanPath}`;
+    }
+
+    // Default for Confluence Server / Data Center without /wiki
+    return `${base.replace(/\/+$/, '')}${cleanPath}`;
   }
 }

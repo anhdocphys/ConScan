@@ -87,6 +87,20 @@ export function getFileBadgeInfo(category, ext) {
   return mapping[category] || mapping.other;
 }
 
+export function ensureWikiInUrl(url) {
+  if (!url) return '';
+  try {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      const u = new URL(url);
+      if (u.hostname.includes('atlassian.net') && !u.pathname.startsWith('/wiki/') && u.pathname !== '/wiki') {
+        u.pathname = '/wiki' + (u.pathname.startsWith('/') ? '' : '/') + u.pathname;
+        return u.toString();
+      }
+    }
+  } catch {}
+  return url;
+}
+
 export function escapeCSV(field) {
   if (field === null || field === undefined) return '""';
   const str = String(field);
@@ -126,8 +140,8 @@ export function exportToCSV(attachments, filename = 'confluence-attachments.csv'
     escapeCSV(att.fileSize),
     escapeCSV(att.formattedSize),
     escapeCSV(att.version),
-    escapeCSV(att.pageUrl),
-    escapeCSV(att.downloadUrl)
+    escapeCSV(ensureWikiInUrl(att.pageUrl)),
+    escapeCSV(ensureWikiInUrl(att.downloadUrl))
   ]);
 
   // UTF-8 BOM for Microsoft Excel Vietnamese compatibility
@@ -139,7 +153,13 @@ export function exportToCSV(attachments, filename = 'confluence-attachments.csv'
 }
 
 export function exportToJSON(attachments, filename = 'confluence-attachments.json') {
-  const jsonContent = JSON.stringify(attachments, null, 2);
+  const sanitized = attachments.map((att) => ({
+    ...att,
+    pageUrl: ensureWikiInUrl(att.pageUrl),
+    downloadUrl: ensureWikiInUrl(att.downloadUrl),
+    viewUrl: ensureWikiInUrl(att.viewUrl)
+  }));
+  const jsonContent = JSON.stringify(sanitized, null, 2);
   const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
   downloadBlob(blob, filename);
 }

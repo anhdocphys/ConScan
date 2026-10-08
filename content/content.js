@@ -26,13 +26,22 @@
     if (metaUser) currentUser = metaUser.getAttribute('content') || '';
     if (metaName) currentFullName = metaName.getAttribute('content') || '';
 
+    // Check if on Atlassian Cloud or URL path contains /wiki
+    const isAtlassianCloud = window.location.hostname.includes('atlassian.net');
+    const pathHasWiki = window.location.pathname.startsWith('/wiki') || contextPath === '/wiki';
+
     // If not found in meta tags, infer from window.location
     if (!baseUrl) {
       const origin = window.location.origin;
-      if (window.location.pathname.startsWith('/wiki')) {
+      if (isAtlassianCloud || pathHasWiki) {
         baseUrl = origin + '/wiki';
       } else {
-        baseUrl = origin;
+        baseUrl = origin + (contextPath || '');
+      }
+    } else {
+      baseUrl = baseUrl.replace(/\/+$/, '');
+      if ((isAtlassianCloud || pathHasWiki) && !baseUrl.endsWith('/wiki')) {
+        baseUrl += '/wiki';
       }
     }
 

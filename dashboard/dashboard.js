@@ -321,6 +321,7 @@ async function updateConnectionStatus() {
       const meta = ensureResp.meta;
       state.baseUrl = meta.baseUrl || state.baseUrl;
       state.client.setBaseUrl(state.baseUrl);
+      state.baseUrl = state.client.baseUrl;
 
       el.connectionDot.className = 'pulse-dot connected';
       try {
