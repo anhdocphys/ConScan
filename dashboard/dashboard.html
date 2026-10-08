@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ConScan - Confluence Attachment Scanner</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Top Navigation Bar -->
+    <header class="top-nav">
+      <div class="nav-left">
+        <div class="nav-logo">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="24" height="24" rx="6" fill="#0052CC"/>
+            <path d="M7 12C7 9.23858 9.23858 7 12 7C14.7614 7 17 9.23858 17 12V14.5C17 15.8807 15.8807 17 14.5 17C13.1193 17 12 15.8807 12 14.5V11C12 10.4477 11.5523 10 11 10C10.4477 10 10 10.4477 10 11V14.5" stroke="white" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <div class="logo-text">
+            <span class="logo-title">ConScan</span>
+            <span class="logo-subtitle">Confluence Attachment Scanner</span>
+          </div>
+        </div>
+
+        <!-- Connection Indicator -->
+        <div class="connection-pill" id="connectionPill">
+          <span class="pulse-dot" id="connectionDot"></span>
+          <span class="conn-label" id="connectionText">Đang tìm kết nối Confluence...</span>
+          <button class="btn-icon" id="btnChangeTarget" title="Đổi tab / cấu hình URL">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 20h9"/>
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="nav-right">
+        <!-- Export buttons -->
+        <div class="export-group">
+          <button id="btnExportCSV" class="btn btn-outline" disabled title="Xuất dữ liệu ra file CSV (Tương thích Excel tiếng Việt)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Xuất CSV
+          </button>
+          <button id="btnExportJSON" class="btn btn-outline" disabled title="Xuất dữ liệu ra file JSON">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="16 18 22 12 16 6"/>
+              <polyline points="8 6 2 12 8 18"/>
+            </svg>
+            Xuất JSON
+          </button>
+        </div>
+
+        <button id="btnSettings" class="btn btn-ghost" title="Cài đặt">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="main-body">
+      <!-- Control & Configuration Bar -->
+      <section class="control-panel">
+        <div class="panel-left">
+          <!-- Space Scope Selector -->
+          <div class="scope-box">
+            <span class="control-label">Phạm vi quét:</span>
+            <div class="radio-toggle">
+              <label class="radio-label">
+                <input type="radio" name="scanScope" value="all" checked id="scopeAll">
+                <span>Tất cả Spaces có quyền</span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="scanScope" value="selected" id="scopeSelected">
+                <span id="selectedSpacesBadge">Chọn Spaces (0)</span>
+              </label>
+            </div>
+            <button id="btnOpenSpaceModal" class="btn btn-secondary btn-sm hidden">
+              Chọn Spaces...
+            </button>
+          </div>
+
+          <!-- Date Range Filter -->
+          <div class="date-filter-group">
+            <span class="control-label">Thời gian upload:</span>
+            <input type="date" id="scanDateFrom" class="date-input" title="Từ ngày">
+            <span class="date-sep">đến</span>
+            <input type="date" id="scanDateTo" class="date-input" title="Đến ngày">
+            <button id="btnClearDates" class="btn-icon-sm" title="Xóa lọc ngày">✕</button>
+          </div>
+        </div>
+
+        <div class="panel-right">
+          <!-- Scan Trigger Buttons -->
+          <button id="btnStartScan" class="btn btn-primary btn-lg">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            Bắt đầu Quét
+          </button>
+          <button id="btnPauseScan" class="btn btn-warning btn-lg hidden">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="6" y="4" width="4" height="16"/>
+              <rect x="14" y="4" width="4" height="16"/>
+            </svg>
+            Tạm dừng
+          </button>
+          <button id="btnStopScan" class="btn btn-danger btn-lg hidden">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="4" y="4" width="16" height="16"/>
+            </svg>
+            Dừng
+          </button>
+        </div>
+      </section>
+
+      <!-- Scan Progress Notification -->
+      <section class="progress-section hidden" id="progressSection">
+        <div class="progress-info">
+          <div class="progress-label" id="progressLabel">Đang khởi tạo quét...</div>
+          <div class="progress-stats" id="progressStats">0 tệp tìm thấy</div>
+        </div>
+        <div class="progress-bar-container">
+          <div class="progress-bar-fill" id="progressBarFill"></div>
+        </div>
+      </section>
+
+      <!-- Metrics Cards -->
+      <section class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-icon bg-blue">📎</div>
+          <div class="metric-content">
+            <div class="metric-value" id="metricTotalFiles">0</div>
+            <div class="metric-title">Tổng số Attachments</div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon bg-purple">💾</div>
+          <div class="metric-content">
+            <div class="metric-value" id="metricTotalSize">0 B</div>
+            <div class="metric-title">Tổng Dung lượng</div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon bg-green">👥</div>
+          <div class="metric-content">
+            <div class="metric-value" id="metricTotalUsers">0</div>
+            <div class="metric-title">Người Upload (Uploaders)</div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon bg-amber">📚</div>
+          <div class="metric-content">
+            <div class="metric-value" id="metricTotalSpaces">0</div>
+            <div class="metric-title">Spaces đã quét</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Search, Filter & View Controls -->
+      <section class="filter-toolbar">
+        <div class="search-box">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="text" id="searchInput" placeholder="Tìm theo tên tệp, tên page, người upload, space..." autocomplete="off">
+          <button id="btnClearSearch" class="btn-clear hidden">✕</button>
+        </div>
+
+        <!-- Filter Dropdowns -->
+        <div class="filter-dropdowns">
+          <!-- Space Filter -->
+          <select id="filterSpace" class="select-filter">
+            <option value="">Tất cả Spaces</option>
+          </select>
+
+          <!-- Uploader Filter -->
+          <select id="filterUploader" class="select-filter">
+            <option value="">Tất cả Người upload</option>
+          </select>
+
+          <!-- Page Filter -->
+          <select id="filterPage" class="select-filter">
+            <option value="">Tất cả Pages</option>
+          </select>
+        </div>
+      </section>
+
+      <!-- Category Filter Chips -->
+      <section class="category-chips" id="categoryChips">
+        <button class="chip active" data-category="all">Tất cả (<span id="catCountAll">0</span>)</button>
+        <button class="chip" data-category="image">🖼️ Hình ảnh (<span id="catCountImage">0</span>)</button>
+        <button class="chip" data-category="pdf">📄 PDF (<span id="catCountPdf">0</span>)</button>
+        <button class="chip" data-category="document">📝 Word/Doc (<span id="catCountDoc">0</span>)</button>
+        <button class="chip" data-category="spreadsheet">📊 Excel/Sheets (<span id="catCountSheet">0</span>)</button>
+        <button class="chip" data-category="presentation">📑 Slide (<span id="catCountSlide">0</span>)</button>
+        <button class="chip" data-category="archive">📦 Nén (<span id="catCountArchive">0</span>)</button>
+        <button class="chip" data-category="code">💻 Code/Data (<span id="catCountCode">0</span>)</button>
+        <button class="chip" data-category="other">📎 Khác (<span id="catCountOther">0</span>)</button>
+      </section>
+
+      <!-- Data Table Container -->
+      <section class="table-container">
+        <table class="data-table" id="attachmentsTable">
+          <thead>
+            <tr>
+              <th data-sort="filename" class="sortable col-file">
+                Tên Tệp Đính Kèm
+                <span class="sort-icon">⇅</span>
+              </th>
+              <th data-sort="space" class="sortable col-space">
+                Space
+                <span class="sort-icon">⇅</span>
+              </th>
+              <th data-sort="page" class="sortable col-page">
+                Page (Trang)
+                <span class="sort-icon">⇅</span>
+              </th>
+              <th data-sort="uploadedBy" class="sortable col-author">
+                Người Upload
+                <span class="sort-icon">⇅</span>
+              </th>
+              <th data-sort="uploadDate" class="sortable col-date">
+                Thời Điểm Upload
+                <span class="sort-icon">⇅</span>
+              </th>
+              <th data-sort="fileSize" class="sortable col-size">
+                Dung Lượng
+                <span class="sort-icon">⇅</span>
+              </th>
+              <th class="col-actions">Thao Tác</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            <!-- Dynamic rows will be inserted here -->
+          </tbody>
+        </table>
+
+        <!-- Empty State -->
+        <div class="empty-state" id="emptyState">
+          <div class="empty-icon">📂</div>
+          <h3 class="empty-title">Chưa có tệp đính kèm nào</h3>
+          <p class="empty-desc">
+            Nhấn nút <strong>"Bắt đầu Quét"</strong> ở trên để tự động quét tất cả các tệp đính kèm trong các không gian Confluence bạn có quyền truy cập.
+          </p>
+        </div>
+
+        <!-- No Filter Results State -->
+        <div class="empty-state hidden" id="noResultsState">
+          <div class="empty-icon">🔍</div>
+          <h3 class="empty-title">Không tìm thấy kết quả phù hợp</h3>
+          <p class="empty-desc">Hãy thử thay đổi từ khóa tìm kiếm hoặc bỏ các bộ lọc đang chọn.</p>
+          <button id="btnResetFilters" class="btn btn-secondary btn-sm">Đặt lại bộ lọc</button>
+        </div>
+      </section>
+
+      <!-- Pagination & Status Footer -->
+      <section class="table-footer">
+        <div class="table-info">
+          Hiển thị <span id="showingStart">0</span> - <span id="showingEnd">0</span> trong số <strong id="showingTotal">0</strong> tệp đính kèm
+        </div>
+
+        <div class="pagination-controls">
+          <div class="page-size-selector">
+            <label for="pageSizeSelect">Mỗi trang:</label>
+            <select id="pageSizeSelect">
+              <option value="25">25</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+              <option value="all">Tất cả</option>
+            </select>
+          </div>
+
+          <div class="page-nav">
+            <button id="btnPrevPage" class="btn btn-sm" disabled>◀ Trước</button>
+            <span class="page-current" id="pageCurrent">Trang 1 / 1</span>
+            <button id="btnNextPage" class="btn btn-sm" disabled>Sau ▶</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Space Selection Modal -->
+  <div class="modal-backdrop hidden" id="spaceModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Chọn các Space cần quét</h3>
+        <button class="modal-close" id="btnCloseSpaceModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="space-search-bar">
+          <input type="text" id="spaceSearchInput" placeholder="Tìm kiếm space..." class="form-input">
+        </div>
+        <div class="space-selection-actions">
+          <button id="btnSelectAllSpaces" class="btn-text">Chọn tất cả</button>
+          <button id="btnDeselectAllSpaces" class="btn-text">Bỏ chọn tất cả</button>
+          <span class="space-selected-count" id="modalSelectedCount">Đã chọn 0 space</span>
+        </div>
+        <div class="space-checkbox-list" id="spaceCheckboxList">
+          <div class="loading-spinner-box">Đang tải danh sách spaces...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnApplySpaces" class="btn btn-primary">Áp dụng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings / Target Confluence Modal -->
+  <div class="modal-backdrop hidden" id="settingsModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Cấu hình kết nối Confluence</h3>
+        <button class="modal-close" id="btnCloseSettingsModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="cfgTabSelect">Chọn Tab Confluence đang mở:</label>
+          <select id="cfgTabSelect" class="form-select"></select>
+          <p class="form-hint">Sử dụng trực tiếp session đăng nhập của trình duyệt (không cần mật khẩu hay token).</p>
+        </div>
+
+        <div class="form-divider"><span>Hoặc nhập thông tin thủ công</span></div>
+
+        <div class="form-group">
+          <label class="form-label" for="cfgBaseUrl">Confluence Base URL:</label>
+          <input type="text" id="cfgBaseUrl" class="form-input" placeholder="ví dụ: https://mycompany.atlassian.net/wiki">
+          <p class="form-hint">Hỗ trợ cả Confluence Cloud và Confluence Server / Data Center.</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="cfgApiToken">Personal Access Token (PAT) / API Token (Tùy chọn):</label>
+          <input type="password" id="cfgApiToken" class="form-input" placeholder="Bỏ trống nếu dùng session trình duyệt">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="cfgThrottle">Độ trễ giữa các lượt quét (ms):</label>
+          <input type="number" id="cfgThrottle" class="form-input" value="100" min="0" max="2000" step="50">
+          <p class="form-hint">Giúp tránh tải cao lên server Confluence.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnSaveSettings" class="btn btn-primary">Lưu cấu hình</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="dashboard.js" type="module"></script>
+</body>
+</html>
