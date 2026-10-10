@@ -160,6 +160,7 @@ function initDOMElements() {
     offlineProgressSub: document.getElementById('offlineProgressSub'),
     offlineSuccessDesc: document.getElementById('offlineSuccessDesc'),
     btnStartOfflineExport: document.getElementById('btnStartOfflineExport'),
+    btnDownloadAllDirect: document.getElementById('btnDownloadAllDirect'),
     btnCancelOfflineExport: document.getElementById('btnCancelOfflineExport'),
     btnCloseOfflineExportDone: document.getElementById('btnCloseOfflineExportDone'),
 
@@ -304,7 +305,8 @@ function setupEventListeners() {
   // Offline Exporter Listeners
   el.btnOpenOfflineModal.addEventListener('click', () => openOfflineModal());
   el.btnCloseOfflineModal.addEventListener('click', () => closeOfflineModal());
-  el.btnStartOfflineExport.addEventListener('click', () => startOfflineExport());
+  el.btnStartOfflineExport.addEventListener('click', () => startOfflineExport('zip'));
+  el.btnDownloadAllDirect.addEventListener('click', () => startOfflineExport('direct'));
   el.btnCancelOfflineExport.addEventListener('click', () => cancelOfflineExport());
   el.btnCloseOfflineExportDone.addEventListener('click', () => closeOfflineModal());
 
@@ -1199,6 +1201,7 @@ async function openOfflineModal() {
   el.treePreviewBody.innerHTML = '';
   el.treePreviewSearch.value = '';
   el.btnStartOfflineExport.disabled = true;
+  el.btnDownloadAllDirect.disabled = true;
 
   await populateOfflineSpaceSelect();
 }
@@ -1237,6 +1240,7 @@ async function onOfflineSpaceSelected() {
   if (!spaceKey) {
     el.offlineTreePreviewContainer.classList.add('hidden');
     el.btnStartOfflineExport.disabled = true;
+    el.btnDownloadAllDirect.disabled = true;
     return;
   }
 
@@ -1251,6 +1255,7 @@ async function onOfflineSpaceSelected() {
   el.treePreviewTitle.textContent = `📁 Cấu trúc thư mục & tài liệu: ${spaceName}`;
   el.treePreviewBadge.textContent = 'Đang quét...';
   el.btnStartOfflineExport.disabled = true;
+  el.btnDownloadAllDirect.disabled = true;
 
   try {
     const pages = await state.client.getSpacePagesOverview(spaceKey);
@@ -1262,6 +1267,7 @@ async function onOfflineSpaceSelected() {
       el.treePreviewBadge.textContent = '0 trang';
       el.treePreviewBody.innerHTML = '<div style="padding:16px; text-align:center; color:#7A869A;">Không tìm thấy trang nào trong Space này hoặc bạn không có quyền xem.</div>';
       el.btnStartOfflineExport.disabled = true;
+      el.btnDownloadAllDirect.disabled = true;
       return;
     }
 
@@ -1269,12 +1275,14 @@ async function onOfflineSpaceSelected() {
     el.treePreviewBody.innerHTML = renderPreviewTree(pages);
     bindPreviewTreeEvents();
     el.btnStartOfflineExport.disabled = false;
+    el.btnDownloadAllDirect.disabled = false;
   } catch (err) {
     console.error('Lỗi tải danh mục Space:', err);
     el.treePreviewLoading.classList.add('hidden');
     el.treePreviewBadge.textContent = 'Lỗi';
     el.treePreviewBody.innerHTML = `<div style="padding:14px; color:#FF5630;">Lỗi quét danh mục: ${escapeHtml(err.message)}</div>`;
     el.btnStartOfflineExport.disabled = true;
+    el.btnDownloadAllDirect.disabled = true;
   }
 }
 
@@ -1326,6 +1334,9 @@ function renderPreviewTree(pages) {
             </span>
             ${hasChildren ? `<span class="preview-node-count">${subCount} tài liệu con</span>` : ''}
             ${n.updatedBy ? `<span style="font-size:11px; color:#7A869A; margin-left:4px;">(${escapeHtml(n.updatedBy)})</span>` : ''}
+            <button type="button" class="btn-download-single-page" data-page-id="${n.id}" data-page-title="${escapeHtml(n.title)}" title="Tải riêng tài liệu này về máy dạng HTML">
+              ⬇️ Tải file
+            </button>
           </div>
           ${hasChildren ? renderNodes(n.children, false) : ''}
         </li>
@@ -1339,6 +1350,7 @@ function renderPreviewTree(pages) {
 }
 
 function bindPreviewTreeEvents() {
+  // Toggle sub-trees
   el.treePreviewBody.querySelectorAll('.preview-toggle-icon').forEach((icon) => {
     icon.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1352,6 +1364,46 @@ function bindPreviewTreeEvents() {
           subUl.style.display = 'none';
           icon.textContent = '▶';
         }
+      }
+    });
+  });
+
+  // Individual page download buttons
+  el.treePreviewBody.querySelectorAll('.btn-download-single-page').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const pageId = btn.dataset.pageId;
+      const pageTitle = btn.dataset.pageTitle || 'Page';
+      const spaceKey = el.offlineSpaceSelect.value;
+      const selectedOpt = el.offlineSpaceSelect.options[el.offlineSpaceSelect.selectedIndex];
+      const spaceName = selectedOpt?.dataset.spaceName || spaceKey;
+
+      btn.disabled = true;
+      const originalText = btn.innerHTML;
+      btn.innerHTML = '⏳ Đang tải...';
+
+      try {
+        const exporter = new OfflineSpaceExporter(state.client);
+        await exporter.exportSinglePage({
+          pageId,
+          pageTitle,
+          spaceKey,
+          spaceName,
+          includeAttachments: el.chkIncludeAttachments.checked
+        });
+        btn.innerHTML = '✅ Đã tải xong';
+        setTimeout(() => {
+          btn.innerHTML = originalText;
+          btn.disabled = false;
+        }, 3000);
+      } catch (err) {
+        console.error('Lỗi khi tải trang:', err);
+        alert(`Lỗi khi tải trang [${pageTitle}]: ${err.message}`);
+        btn.innerHTML = '❌ Lỗi';
+        setTimeout(() => {
+          btn.innerHTML = originalText;
+          btn.disabled = false;
+        }, 3000);
       }
     });
   });
@@ -1406,7 +1458,7 @@ function setOfflineStep(step) {
   });
 }
 
-async function startOfflineExport() {
+async function startOfflineExport(mode = 'zip') {
   const spaceKey = el.offlineSpaceSelect.value;
   if (!spaceKey) {
     alert('Vui lòng chọn một Space cần tải xuống.');
@@ -1424,55 +1476,92 @@ async function startOfflineExport() {
   el.offlineProgressView.classList.remove('hidden');
   el.offlineSuccessView.classList.add('hidden');
   el.btnStartOfflineExport.classList.add('hidden');
+  el.btnDownloadAllDirect.classList.add('hidden');
   el.btnCancelOfflineExport.classList.remove('hidden');
   el.btnCloseOfflineExportDone.classList.add('hidden');
 
   setOfflineStep(1);
   el.offlineProgressBarFill.style.width = '5%';
-  el.offlineProgressLabel.textContent = 'Đang khởi tạo tiến trình xuất offline...';
+  el.offlineProgressLabel.textContent = 'Đang khởi tạo tiến trình tải...';
 
   try {
     const exporter = new OfflineSpaceExporter(state.client);
-    const result = await exporter.exportSpace({
-      spaceKey,
-      spaceName,
-      includeAttachments,
-      throttleMs: state.throttleMs || 50,
-      onProgress: (p) => {
-        el.offlineProgressBarFill.style.width = `${p.percent}%`;
-        el.offlineProgressLabel.textContent = p.currentText;
 
-        if (p.stage === 'FETCHING_PAGES') {
-          setOfflineStep(1);
-        } else if (p.stage === 'BUILDING_TREE') {
-          setOfflineStep(2);
-        } else if (p.stage === 'FETCHING_ATTACHMENTS_LIST' || p.stage === 'DOWNLOADING_ASSETS') {
-          setOfflineStep(3);
-        } else if (p.stage === 'GENERATING_HTML' || p.stage === 'GENERATING_PORTAL' || p.stage === 'COMPRESSING') {
-          setOfflineStep(4);
-        }
-      },
-      isCancelled: () => offlineExporterCancel
-    });
+    if (mode === 'direct') {
+      // Direct file-by-file sequential download
+      const result = await exporter.exportAllPagesDirect({
+        spaceKey,
+        spaceName,
+        pages: currentPreviewPages,
+        includeAttachments,
+        throttleMs: state.throttleMs || 100,
+        onProgress: (p) => {
+          el.offlineProgressBarFill.style.width = `${p.percent}%`;
+          el.offlineProgressLabel.textContent = p.currentText;
 
-    // Trigger download of zip
-    const url = URL.createObjectURL(result.blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = result.filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+          if (p.stage === 'FETCHING_PAGES') {
+            setOfflineStep(1);
+          } else if (p.stage === 'DOWNLOADING_DIRECT') {
+            setOfflineStep(3);
+          } else if (p.stage === 'COMPLETED') {
+            setOfflineStep(4);
+          }
+        },
+        isCancelled: () => offlineExporterCancel
+      });
 
-    // Switch to success view
-    setOfflineStep(5);
-    el.offlineProgressView.classList.add('hidden');
-    el.offlineSuccessView.classList.remove('hidden');
-    el.btnCancelOfflineExport.classList.add('hidden');
-    el.btnCloseOfflineExportDone.classList.remove('hidden');
+      // Switch to success view
+      setOfflineStep(4);
+      el.offlineProgressView.classList.add('hidden');
+      el.offlineSuccessView.classList.remove('hidden');
+      el.btnCancelOfflineExport.classList.add('hidden');
+      el.btnCloseOfflineExportDone.classList.remove('hidden');
 
-    el.offlineSuccessDesc.textContent = `Đã tải xuống thành công ${result.totalPages} trang và ${result.totalAttachments} tệp đính kèm.`;
+      el.offlineSuccessDesc.textContent = `Đã tải xuống thành công ${result.downloadedCount}/${result.totalPages} tài liệu trực tiếp vào thư mục Downloads của bạn.`;
+    } else {
+      // ZIP bundle download with 100% pages guaranteed
+      const result = await exporter.exportSpace({
+        spaceKey,
+        spaceName,
+        pages: currentPreviewPages,
+        includeAttachments,
+        throttleMs: state.throttleMs || 50,
+        onProgress: (p) => {
+          el.offlineProgressBarFill.style.width = `${p.percent}%`;
+          el.offlineProgressLabel.textContent = p.currentText;
+
+          if (p.stage === 'FETCHING_PAGES') {
+            setOfflineStep(1);
+          } else if (p.stage === 'BUILDING_TREE') {
+            setOfflineStep(2);
+          } else if (p.stage === 'FETCHING_ATTACHMENTS_LIST' || p.stage === 'DOWNLOADING_ASSETS') {
+            setOfflineStep(3);
+          } else if (p.stage === 'GENERATING_HTML' || p.stage === 'GENERATING_PORTAL' || p.stage === 'COMPRESSING') {
+            setOfflineStep(4);
+          }
+        },
+        isCancelled: () => offlineExporterCancel
+      });
+
+      // Trigger download of zip
+      const url = URL.createObjectURL(result.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+      // Switch to success view
+      setOfflineStep(4);
+      el.offlineProgressView.classList.add('hidden');
+      el.offlineSuccessView.classList.remove('hidden');
+      el.btnCancelOfflineExport.classList.add('hidden');
+      el.btnCloseOfflineExportDone.classList.remove('hidden');
+
+      el.offlineSuccessDesc.textContent = `Đã tải xuống thành công trọn bộ đầy đủ ${result.totalPages} trang và ${result.totalAttachments} tệp đính kèm vào file ZIP.`;
+    }
   } catch (err) {
     if (offlineExporterCancel) {
       alert('Đã hủy tiến trình tải offline.');
@@ -1483,6 +1572,7 @@ async function startOfflineExport() {
     el.offlineFormView.classList.remove('hidden');
     el.offlineProgressView.classList.add('hidden');
     el.btnStartOfflineExport.classList.remove('hidden');
+    el.btnDownloadAllDirect.classList.remove('hidden');
     el.btnCancelOfflineExport.classList.add('hidden');
   }
 }

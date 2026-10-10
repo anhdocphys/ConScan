@@ -236,6 +236,31 @@ export class ConfluenceApiClient {
   }
 
   /**
+   * Fetch a single page's full details and body with multi-tier fallback
+   */
+  async getPageDetailsWithBody(pageId) {
+    if (!this.restBase) await this.detectApiBase();
+
+    try {
+      const endpoint = `/content/${pageId}?expand=ancestors,body.export_view,body.view,body.storage,version,history,metadata`;
+      return await this.request(endpoint);
+    } catch {
+      try {
+        const endpoint = `/content/${pageId}?expand=ancestors,body.view,body.storage,version,history,metadata`;
+        return await this.request(endpoint);
+      } catch {
+        try {
+          const endpoint = `/content/${pageId}?expand=ancestors,body.view,version,history`;
+          return await this.request(endpoint);
+        } catch {
+          const endpoint = `/content/${pageId}?expand=version,history`;
+          return await this.request(endpoint);
+        }
+      }
+    }
+  }
+
+  /**
    * Probe and detect whether REST API is at /wiki/rest/api or /rest/api
    */
   async detectApiBase() {

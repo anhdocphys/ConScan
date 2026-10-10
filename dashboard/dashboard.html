@@ -414,7 +414,7 @@
 
             <div class="tree-preview-footer">
               <span class="tree-footer-info" id="treeFooterInfo">
-                💡 Hãy kiểm tra danh mục trên để xác nhận đúng nội dung trước khi bấm <strong>"Bắt đầu Tải Xuống"</strong>.
+                💡 Bạn có thể bấm <strong>"⬇️ Tải file"</strong> ở từng dòng để tải ngay tài liệu đó, hoặc chọn một trong hai chế độ tải toàn bộ bên dưới.
               </span>
             </div>
           </div>
@@ -458,7 +458,7 @@
             <div class="step-line" id="offlineLine3"></div>
             <div class="step-item" id="offlineStep4">
               <div class="step-circle">4</div>
-              <div class="step-label">Nén ZIP</div>
+              <div class="step-label">Hoàn tất</div>
             </div>
           </div>
 
@@ -476,13 +476,13 @@
           <div class="success-banner">
             <div class="success-icon">🎉</div>
             <h4 class="success-title">Tải Space Offline Thành Công!</h4>
-            <p class="success-desc" id="offlineSuccessDesc">File ZIP đã được tải xuống máy tính của bạn.</p>
+            <p class="success-desc" id="offlineSuccessDesc">Đã tải dữ liệu xuống máy tính của bạn.</p>
             <div class="instructions-box">
               <strong>📖 Hướng dẫn sử dụng:</strong>
               <ol>
-                <li>Giải nén file ZIP vừa tải về vào một thư mục trên máy tính.</li>
-                <li>Mở file <code>index.html</code> bằng bất kỳ trình duyệt nào để xem toàn bộ Space với cây thư mục.</li>
-                <li>Hoặc bạn có thể truy cập trực tiếp vào từng thư mục theo đúng cấu trúc trang con đã lưu trữ.</li>
+                <li>Nếu tải file ZIP: Giải nén file ZIP vào một thư mục trên máy tính và mở file <code>index.html</code>.</li>
+                <li>Nếu tải từng file: Các tệp HTML đã được lưu trực tiếp vào thư mục Downloads của bạn theo đúng thư mục phân cấp.</li>
+                <li>Bạn có thể mở bất kỳ file HTML nào để xem nội dung offline mà không cần kết nối mạng.</li>
               </ol>
             </div>
           </div>
@@ -490,7 +490,8 @@
       </div>
       <div class="modal-footer">
         <button id="btnCancelOfflineExport" class="btn btn-secondary hidden">Hủy tải</button>
-        <button id="btnStartOfflineExport" class="btn btn-primary">Bắt đầu Tải Xuống</button>
+        <button id="btnDownloadAllDirect" class="btn btn-secondary" disabled title="Tải tuần tự từng file HTML lưu vào thư mục Downloads không cần nén ZIP">📥 Tải từng file về máy</button>
+        <button id="btnStartOfflineExport" class="btn btn-primary" disabled title="Đóng gói toàn bộ 100% trang thành file ZIP offline">📦 Tải trọn bộ file ZIP</button>
         <button id="btnCloseOfflineExportDone" class="btn btn-primary hidden">Đóng</button>
       </div>
     </div>

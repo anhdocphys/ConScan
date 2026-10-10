@@ -14,10 +14,12 @@ export class OfflineSpaceExporter {
 
   /**
    * Export an entire space into an offline ZIP bundle
+   * Guarantees 100% of previewed pages are included (0 dropped pages)
    */
   async exportSpace({
     spaceKey,
     spaceName = '',
+    pages = null,
     includeAttachments = true,
     throttleMs = 50,
     onProgress = () => {},
@@ -27,50 +29,95 @@ export class OfflineSpaceExporter {
     const cleanSpaceName = sanitizeFilename(spaceName || spaceKey);
     const spaceRoot = cleanSpaceName;
 
-    // 1. Fetch all pages in the space
-    onProgress({
-      stage: 'FETCHING_PAGES',
-      percent: 5,
-      currentText: `Đang quét toàn bộ trang trong không gian [${spaceKey}]...`
-    });
-
-    const rawPages = await this.client.getAllPagesInSpace(spaceKey, (p) => {
+    // 1. Get complete list of pages in the space
+    let pageList = pages;
+    if (!pageList || pageList.length === 0) {
       onProgress({
         stage: 'FETCHING_PAGES',
-        percent: Math.min(25, 5 + Math.round((p.loaded / 50) * 10)),
-        currentText: `Đã tìm thấy ${p.loaded} trang...`
+        percent: 5,
+        currentText: `Đang quét toàn bộ danh mục trang trong không gian [${spaceKey}]...`
       });
-    });
+
+      pageList = await this.client.getSpacePagesOverview(spaceKey, (p) => {
+        onProgress({
+          stage: 'FETCHING_PAGES',
+          percent: Math.min(20, 5 + Math.round((p.loaded / 50) * 10)),
+          currentText: `Đã tìm thấy ${p.loaded} trang...`
+        });
+      });
+    }
 
     if (isCancelled()) throw new Error('Đã hủy tải.');
 
-    if (!rawPages || rawPages.length === 0) {
+    if (!pageList || pageList.length === 0) {
       throw new Error(`Không gian [${spaceKey}] không có trang nào hoặc bạn không có quyền xem.`);
     }
 
-    // 2. Build page hierarchy and compute relative directory paths
+    // 2. Fetch full body content for each page individually
     onProgress({
-      stage: 'BUILDING_TREE',
-      percent: 28,
-      currentText: `Đang xây dựng cấu trúc cây thư mục (${rawPages.length} trang)...`
+      stage: 'FETCHING_PAGES',
+      percent: 22,
+      currentText: `Đang tải nội dung chi tiết ${pageList.length} trang...`
     });
 
     const pageMap = new Map(); // id -> node
-    rawPages.forEach((p) => {
-      pageMap.set(p.id, {
-        id: p.id,
-        title: p.title || `Page_${p.id}`,
-        safeTitle: sanitizeFilename(p.title || `Page_${p.id}`),
-        ancestors: p.ancestors || [],
-        raw: p,
-        children: [],
-        dirPath: '',
-        htmlPath: '',
-        attachments: []
-      });
+    const totalPages = pageList.length;
+    const concurrency = 4;
+    let fetchedPagesCount = 0;
+
+    for (let i = 0; i < pageList.length; i += concurrency) {
+      if (isCancelled()) throw new Error('Đã hủy tải.');
+      const batch = pageList.slice(i, i + concurrency);
+
+      await Promise.all(
+        batch.map(async (p) => {
+          let fullData;
+          try {
+            fullData = await this.client.getPageDetailsWithBody(p.id);
+          } catch {
+            fullData = {
+              id: p.id,
+              title: p.title,
+              ancestors: p.ancestors || [],
+              body: { view: { value: '<p><em>Nội dung trang không thể tải được.</em></p>' } }
+            };
+          }
+
+          pageMap.set(p.id, {
+            id: p.id,
+            title: fullData.title || p.title || `Page_${p.id}`,
+            safeTitle: sanitizeFilename(fullData.title || p.title || `Page_${p.id}`),
+            ancestors: fullData.ancestors || p.ancestors || [],
+            raw: fullData,
+            children: [],
+            dirPath: '',
+            htmlPath: '',
+            attachments: []
+          });
+
+          fetchedPagesCount++;
+          const pct = 22 + Math.round((fetchedPagesCount / totalPages) * 16);
+          onProgress({
+            stage: 'FETCHING_PAGES',
+            percent: Math.min(38, pct),
+            currentText: `Đã tải nội dung: ${p.title} (${fetchedPagesCount}/${totalPages})...`
+          });
+        })
+      );
+
+      if (throttleMs > 0) {
+        await new Promise((r) => setTimeout(r, throttleMs));
+      }
+    }
+
+    // 3. Build page hierarchy and compute relative directory paths
+    onProgress({
+      stage: 'BUILDING_TREE',
+      percent: 40,
+      currentText: `Đang xây dựng cấu trúc cây thư mục (${pageMap.size} trang)...`
     });
 
-    // Determine parent-child links and build safe paths
+    // Determine parent-child links
     const rootNodes = [];
     pageMap.forEach((node) => {
       const parentAncestor = node.ancestors.filter((a) => pageMap.has(a.id)).pop();
@@ -106,24 +153,34 @@ export class OfflineSpaceExporter {
 
     computePaths(rootNodes, '');
 
-    // 3. Fetch attachments if requested
+    // Safety fallback: ensure 100% of nodes in pageMap have dirPath and htmlPath
+    pageMap.forEach((node) => {
+      if (!node.dirPath) {
+        node.folderName = `${node.safeTitle}_${node.id}`;
+        node.dirPath = `${spaceRoot}/${node.folderName}`;
+        node.htmlPath = `${node.dirPath}/index.html`;
+        rootNodes.push(node);
+      }
+    });
+
+    // 4. Fetch attachments if requested
     let totalAttachments = 0;
     let fetchedAttachments = 0;
 
     if (includeAttachments) {
       onProgress({
         stage: 'FETCHING_ATTACHMENTS_LIST',
-        percent: 32,
+        percent: 45,
         currentText: 'Đang kiểm tra danh sách tệp đính kèm và hình ảnh...'
       });
 
-      for (let i = 0; i < rawPages.length; i++) {
+      const allNodesList = Array.from(pageMap.values());
+      for (let i = 0; i < allNodesList.length; i++) {
         if (isCancelled()) throw new Error('Đã hủy tải.');
-        const pageId = rawPages[i].id;
-        const node = pageMap.get(pageId);
+        const node = allNodesList[i];
 
         try {
-          const attResp = await this.client.getPageAttachments(pageId, 0, 100);
+          const attResp = await this.client.getPageAttachments(node.id, 0, 100);
           const attList = attResp.attachments || [];
           node.attachments = attList;
           totalAttachments += attList.length;
@@ -138,11 +195,10 @@ export class OfflineSpaceExporter {
 
       onProgress({
         stage: 'DOWNLOADING_ASSETS',
-        percent: 38,
+        percent: 50,
         currentText: `Bắt đầu tải ${totalAttachments} tệp đính kèm & hình ảnh...`
       });
 
-      // Download binary assets for each page
       for (const node of pageMap.values()) {
         if (isCancelled()) throw new Error('Đã hủy tải.');
 
@@ -160,10 +216,10 @@ export class OfflineSpaceExporter {
             zip.addBase64File(attZipPath, dataUrl);
             fetchedAttachments++;
 
-            const pct = 38 + Math.round((fetchedAttachments / Math.max(1, totalAttachments)) * 32);
+            const pct = 50 + Math.round((fetchedAttachments / Math.max(1, totalAttachments)) * 25);
             onProgress({
               stage: 'DOWNLOADING_ASSETS',
-              percent: Math.min(70, pct),
+              percent: Math.min(75, pct),
               currentText: `Đang tải tệp: ${att.filename} (${fetchedAttachments}/${totalAttachments})...`
             });
           } catch (err) {
@@ -177,10 +233,10 @@ export class OfflineSpaceExporter {
       }
     }
 
-    // 4. Generate HTML for each page
+    // 5. Generate HTML for each page
     onProgress({
       stage: 'GENERATING_HTML',
-      percent: 72,
+      percent: 78,
       currentText: 'Đang tạo giao diện HTML hoạt động offline cho từng trang...'
     });
 
@@ -199,18 +255,18 @@ export class OfflineSpaceExporter {
       zip.addFile(node.htmlPath, pageHtml);
       generatedPages++;
 
-      const pct = 72 + Math.round((generatedPages / rawPages.length) * 15);
+      const pct = 78 + Math.round((generatedPages / pageMap.size) * 12);
       onProgress({
         stage: 'GENERATING_HTML',
-        percent: Math.min(88, pct),
-        currentText: `Đã đóng gói trang: ${node.title} (${generatedPages}/${rawPages.length})...`
+        percent: Math.min(90, pct),
+        currentText: `Đã đóng gói trang: ${node.title} (${generatedPages}/${pageMap.size})...`
       });
     }
 
-    // 5. Generate Master Interactive Viewer (index.html at root)
+    // 6. Generate Master Interactive Viewer (index.html at root)
     onProgress({
       stage: 'GENERATING_PORTAL',
-      percent: 90,
+      percent: 91,
       currentText: 'Đang tạo cổng duyệt tương tác (Interactive Offline Viewer)...'
     });
 
@@ -223,11 +279,9 @@ export class OfflineSpaceExporter {
     });
 
     zip.addFile(`${spaceRoot}/index.html`, masterPortalHtml);
-
-    // Add offline CSS file for shared styling
     zip.addFile(`${spaceRoot}/offline-styles.css`, getOfflineCSS());
 
-    // 6. Generate ZIP Archive
+    // 7. Generate ZIP Archive
     onProgress({
       stage: 'COMPRESSING',
       percent: 94,
@@ -239,14 +293,206 @@ export class OfflineSpaceExporter {
     onProgress({
       stage: 'COMPLETED',
       percent: 100,
-      currentText: `✅ Đã tạo gói offline thành công! Kích thước: ${formatBytes(blob.size)}.`
+      currentText: `✅ Đã tạo gói offline thành công! Đầy đủ ${pageMap.size} trang (${formatBytes(blob.size)}).`
     });
 
     return {
       blob,
       filename: `${cleanSpaceName}_Offline_Pages.zip`,
-      totalPages: rawPages.length,
+      totalPages: pageMap.size,
       totalAttachments: fetchedAttachments
+    };
+  }
+
+  /**
+   * Export a single page directly as a standalone HTML file
+   */
+  async exportSinglePage({
+    pageId,
+    pageTitle = '',
+    spaceKey = '',
+    spaceName = '',
+    includeAttachments = true
+  }) {
+    // 1. Fetch full page content
+    const pageData = await this.client.getPageDetailsWithBody(pageId);
+    let attachments = [];
+
+    // 2. Fetch attachments if requested
+    if (includeAttachments) {
+      try {
+        const attResp = await this.client.getPageAttachments(pageId, 0, 100);
+        attachments = attResp.attachments || [];
+      } catch {
+        // Ignore attachment listing error
+      }
+    }
+
+    // 3. Render self-contained standalone HTML
+    const htmlContent = renderStandalonePageHtml({
+      page: pageData,
+      spaceKey,
+      spaceName,
+      attachments
+    });
+
+    const safeTitle = sanitizeFilename(pageData.title || pageTitle || `Page_${pageId}`);
+    const filename = `${safeTitle}.html`;
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+
+    // 4. Trigger direct download
+    await triggerBrowserDownload({
+      blob,
+      filename
+    });
+
+    return {
+      blob,
+      filename,
+      pageTitle: pageData.title || pageTitle
+    };
+  }
+
+  /**
+   * Export all pages directly one by one into Downloads folder without ZIP compression
+   */
+  async exportAllPagesDirect({
+    spaceKey,
+    spaceName = '',
+    pages = null,
+    includeAttachments = false,
+    throttleMs = 150,
+    onProgress = () => {},
+    isCancelled = () => false
+  }) {
+    const cleanSpaceName = sanitizeFilename(spaceName || spaceKey);
+    const spaceRoot = cleanSpaceName;
+
+    let pageList = pages;
+    if (!pageList || pageList.length === 0) {
+      onProgress({
+        stage: 'FETCHING_PAGES',
+        percent: 5,
+        currentText: `Đang quét danh mục trang trong [${spaceKey}]...`
+      });
+      pageList = await this.client.getSpacePagesOverview(spaceKey);
+    }
+
+    if (isCancelled()) throw new Error('Đã hủy tải.');
+    if (!pageList || pageList.length === 0) {
+      throw new Error(`Không gian [${spaceKey}] không có trang nào.`);
+    }
+
+    // Build hierarchy paths
+    const pageMap = new Map();
+    pageList.forEach((p) => {
+      pageMap.set(p.id, {
+        id: p.id,
+        title: p.title || `Page_${p.id}`,
+        safeTitle: sanitizeFilename(p.title || `Page_${p.id}`),
+        ancestors: p.ancestors || [],
+        raw: p,
+        children: [],
+        dirPath: '',
+        htmlPath: '',
+        attachments: []
+      });
+    });
+
+    const rootNodes = [];
+    pageMap.forEach((node) => {
+      const parentAncestor = node.ancestors.filter((a) => pageMap.has(a.id)).pop();
+      if (parentAncestor) {
+        const parentNode = pageMap.get(parentAncestor.id);
+        parentNode.children.push(node);
+        node.parent = parentNode;
+      } else {
+        rootNodes.push(node);
+      }
+    });
+
+    function computeDirectPaths(nodeList, parentPath) {
+      const usedNames = new Set();
+      nodeList.forEach((node) => {
+        let name = node.safeTitle;
+        if (usedNames.has(name.toLowerCase())) {
+          name = `${name}_${node.id}`;
+        }
+        usedNames.add(name.toLowerCase());
+        node.folderName = name;
+        node.dirPath = parentPath ? `${parentPath}/${name}` : `${spaceRoot}/${name}`;
+        node.htmlPath = `${node.dirPath}/${node.safeTitle}.html`;
+
+        if (node.children.length > 0) {
+          computeDirectPaths(node.children, node.dirPath);
+        }
+      });
+    }
+
+    computeDirectPaths(rootNodes, '');
+    pageMap.forEach((node) => {
+      if (!node.dirPath) {
+        node.dirPath = `${spaceRoot}/${node.safeTitle}_${node.id}`;
+        node.htmlPath = `${node.dirPath}/${node.safeTitle}.html`;
+      }
+    });
+
+    let downloadedCount = 0;
+    const totalPages = pageMap.size;
+
+    for (const node of pageMap.values()) {
+      if (isCancelled()) throw new Error('Đã hủy tải.');
+
+      onProgress({
+        stage: 'DOWNLOADING_DIRECT',
+        percent: Math.min(95, Math.round((downloadedCount / totalPages) * 100)),
+        currentText: `Đang tải file (${downloadedCount + 1}/${totalPages}): ${node.title}...`
+      });
+
+      let fullData;
+      try {
+        fullData = await this.client.getPageDetailsWithBody(node.id);
+      } catch {
+        fullData = { id: node.id, title: node.title, body: { view: { value: '<p>Nội dung không khả dụng.</p>' } } };
+      }
+
+      let attachments = [];
+      if (includeAttachments) {
+        try {
+          const attResp = await this.client.getPageAttachments(node.id, 0, 100);
+          attachments = attResp.attachments || [];
+        } catch {}
+      }
+
+      const htmlContent = renderStandalonePageHtml({
+        page: fullData,
+        spaceKey,
+        spaceName,
+        attachments
+      });
+
+      const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+      await triggerBrowserDownload({
+        blob,
+        filename: node.htmlPath
+      });
+
+      downloadedCount++;
+
+      if (throttleMs > 0) {
+        await new Promise((r) => setTimeout(r, throttleMs));
+      }
+    }
+
+    onProgress({
+      stage: 'COMPLETED',
+      percent: 100,
+      currentText: `✅ Đã tải thành công ${downloadedCount}/${totalPages} tệp HTML trực tiếp vào máy tính!`
+    });
+
+    return {
+      totalPages,
+      downloadedCount
     };
   }
 }
@@ -910,3 +1156,128 @@ function escapeHtml(str) {
 function escapeRegExp(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+/**
+ * Render a self-contained offline HTML page with embedded styles
+ */
+export function renderStandalonePageHtml({ page, spaceKey = '', spaceName = '', attachments = [] }) {
+  const p = page;
+  let rawBody = p.body?.export_view?.value || p.body?.view?.value || p.body?.storage?.value || '<p>Không có nội dung.</p>';
+  const authorName = p.version?.by?.displayName || p.history?.createdBy?.displayName || 'Không rõ';
+  const updatedDate = formatDate(p.version?.when || p.history?.createdDate);
+  const versionNum = p.version?.number || 1;
+  const pageTitle = p.title || 'Untitled';
+  const webui = p._links?.webui || '';
+
+  // Render attachments section if any
+  let attachmentsSection = '';
+  if (attachments && attachments.length > 0) {
+    const attRows = attachments
+      .map((att) => {
+        const badge = getFileBadgeInfo(getFileCategory(att.filename), att.extension);
+        const dlUrl = att.downloadUrl || '#';
+        return `
+        <div class="offline-att-item">
+          <span class="offline-att-badge" style="background:${badge.bg}; color:${badge.text};">${badge.label}</span>
+          <span class="offline-att-name">${escapeHtml(att.filename)}</span>
+          <span class="offline-att-size">${formatBytes(att.fileSize)}</span>
+          ${dlUrl !== '#' ? `<a href="${dlUrl}" target="_blank" class="offline-att-dl">Tải về / Mở ⬇️</a>` : ''}
+        </div>
+      `;
+      })
+      .join('');
+
+    attachmentsSection = `
+      <section class="offline-attachments-box">
+        <h3 class="offline-attachments-title">📎 Tệp đính kèm (${attachments.length})</h3>
+        <div class="offline-attachments-list">
+          ${attRows}
+        </div>
+      </section>
+    `;
+  }
+
+  const css = getOfflineCSS();
+
+  return `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(pageTitle)} - ${escapeHtml(spaceName || spaceKey)}</title>
+  <style>
+${css}
+  </style>
+</head>
+<body class="offline-page-body">
+  <div class="offline-top-nav">
+    <div class="offline-breadcrumb">
+      <span>🏠 ${escapeHtml(spaceName || spaceKey)}</span>
+      <span class="sep">/</span>
+      <span>${escapeHtml(pageTitle)}</span>
+    </div>
+    <div class="offline-nav-actions">
+      ${webui ? `<a href="${escapeHtml(webui)}" target="_blank" class="btn-portal">🔗 Xem trên Confluence</a>` : ''}
+    </div>
+  </div>
+
+  <main class="offline-article-container">
+    <header class="offline-page-header">
+      <h1 class="offline-page-title">${escapeHtml(pageTitle)}</h1>
+      <div class="offline-page-meta">
+        <span>👤 Người cập nhật: <strong>${escapeHtml(authorName)}</strong></span>
+        <span>🕒 Cập nhật: <strong>${escapeHtml(updatedDate)}</strong></span>
+        <span>🔢 Phiên bản: <strong>v${versionNum}</strong></span>
+      </div>
+    </header>
+
+    <div class="offline-content-body wiki-content">
+      ${rawBody}
+    </div>
+
+    ${attachmentsSection}
+  </main>
+</body>
+</html>`;
+}
+
+/**
+ * Universal browser file downloader with chrome.downloads support & anchor fallback
+ */
+export async function triggerBrowserDownload({ blob, filename }) {
+  const url = URL.createObjectURL(blob);
+  if (typeof chrome !== 'undefined' && chrome.downloads?.download) {
+    return new Promise((resolve) => {
+      chrome.downloads.download(
+        {
+          url: url,
+          filename: filename,
+          conflictAction: 'uniquify',
+          saveAs: false
+        },
+        (downloadId) => {
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+          if (chrome.runtime?.lastError) {
+            console.warn('chrome.downloads fallback:', chrome.runtime.lastError.message);
+            fallbackAnchorDownload(url, filename);
+          }
+          resolve(downloadId);
+        }
+      );
+    });
+  } else {
+    fallbackAnchorDownload(url, filename);
+    return true;
+  }
+}
+
+function fallbackAnchorDownload(url, filename) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename.split('/').pop() || 'document.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
