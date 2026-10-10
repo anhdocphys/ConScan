@@ -195,6 +195,47 @@ export class ConfluenceApiClient {
   }
 
   /**
+   * Fetch lightweight pages overview for space preview (without heavy HTML body)
+   */
+  async getSpacePagesOverview(spaceKey, onProgress = null) {
+    if (!this.restBase) await this.detectApiBase();
+
+    const pages = [];
+    let start = 0;
+    const limit = 100;
+    let hasMore = true;
+
+    while (hasMore) {
+      const endpoint = `/space/${encodeURIComponent(spaceKey)}/content/page?limit=${limit}&start=${start}&expand=ancestors,version,history,metadata`;
+      const data = await this.request(endpoint);
+      const batch = data.results || [];
+
+      for (const p of batch) {
+        pages.push({
+          id: p.id,
+          title: p.title,
+          ancestors: p.ancestors || [],
+          version: p.version?.number || 1,
+          updatedBy: p.version?.by?.displayName || p.history?.createdBy?.displayName || '',
+          updatedDate: p.version?.when || p.history?.createdDate || ''
+        });
+      }
+
+      if (onProgress) {
+        onProgress({ loaded: pages.length });
+      }
+
+      if (batch.length < limit || !data._links?.next) {
+        hasMore = false;
+      } else {
+        start += limit;
+      }
+    }
+
+    return pages;
+  }
+
+  /**
    * Probe and detect whether REST API is at /wiki/rest/api or /rest/api
    */
   async detectApiBase() {

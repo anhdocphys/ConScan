@@ -161,7 +161,18 @@ function initDOMElements() {
     offlineSuccessDesc: document.getElementById('offlineSuccessDesc'),
     btnStartOfflineExport: document.getElementById('btnStartOfflineExport'),
     btnCancelOfflineExport: document.getElementById('btnCancelOfflineExport'),
-    btnCloseOfflineExportDone: document.getElementById('btnCloseOfflineExportDone')
+    btnCloseOfflineExportDone: document.getElementById('btnCloseOfflineExportDone'),
+
+    // Tree Confirmation Preview Elements
+    offlineTreePreviewContainer: document.getElementById('offlineTreePreviewContainer'),
+    treePreviewTitle: document.getElementById('treePreviewTitle'),
+    treePreviewBadge: document.getElementById('treePreviewBadge'),
+    treePreviewSearch: document.getElementById('treePreviewSearch'),
+    btnExpandAllTree: document.getElementById('btnExpandAllTree'),
+    btnCollapseAllTree: document.getElementById('btnCollapseAllTree'),
+    treePreviewLoading: document.getElementById('treePreviewLoading'),
+    treePreviewBody: document.getElementById('treePreviewBody'),
+    treeFooterInfo: document.getElementById('treeFooterInfo')
   };
 }
 
@@ -296,6 +307,12 @@ function setupEventListeners() {
   el.btnStartOfflineExport.addEventListener('click', () => startOfflineExport());
   el.btnCancelOfflineExport.addEventListener('click', () => cancelOfflineExport());
   el.btnCloseOfflineExportDone.addEventListener('click', () => closeOfflineModal());
+
+  // Offline Space Selection & Tree Preview Listeners
+  el.offlineSpaceSelect.addEventListener('change', () => onOfflineSpaceSelected());
+  el.treePreviewSearch.addEventListener('input', (e) => filterPreviewTree(e.target.value));
+  el.btnExpandAllTree.addEventListener('click', () => toggleAllPreviewNodes(true));
+  el.btnCollapseAllTree.addEventListener('click', () => toggleAllPreviewNodes(false));
 }
 
 // ---------------- Confluence Connection ---------------- //
@@ -1166,6 +1183,7 @@ function getAvatarColor(name = '') {
 // ---------------- Offline Space Exporter ---------------- //
 
 let offlineExporterCancel = false;
+let currentPreviewPages = [];
 
 async function openOfflineModal() {
   el.offlineModal.classList.remove('hidden');
@@ -1175,6 +1193,12 @@ async function openOfflineModal() {
   el.btnStartOfflineExport.classList.remove('hidden');
   el.btnCancelOfflineExport.classList.add('hidden');
   el.btnCloseOfflineExportDone.classList.add('hidden');
+
+  // Reset tree preview
+  el.offlineTreePreviewContainer.classList.add('hidden');
+  el.treePreviewBody.innerHTML = '';
+  el.treePreviewSearch.value = '';
+  el.btnStartOfflineExport.disabled = true;
 
   await populateOfflineSpaceSelect();
 }
@@ -1205,6 +1229,157 @@ async function populateOfflineSpaceSelect() {
     opt.textContent = `${s.name} (${s.key})`;
     opt.dataset.spaceName = s.name;
     el.offlineSpaceSelect.appendChild(opt);
+  });
+}
+
+async function onOfflineSpaceSelected() {
+  const spaceKey = el.offlineSpaceSelect.value;
+  if (!spaceKey) {
+    el.offlineTreePreviewContainer.classList.add('hidden');
+    el.btnStartOfflineExport.disabled = true;
+    return;
+  }
+
+  const selectedOpt = el.offlineSpaceSelect.options[el.offlineSpaceSelect.selectedIndex];
+  const spaceName = selectedOpt.dataset.spaceName || spaceKey;
+
+  // Show container and loading skeleton
+  el.offlineTreePreviewContainer.classList.remove('hidden');
+  el.treePreviewLoading.classList.remove('hidden');
+  el.treePreviewBody.innerHTML = '';
+  el.treePreviewSearch.value = '';
+  el.treePreviewTitle.textContent = `📁 Cấu trúc thư mục & tài liệu: ${spaceName}`;
+  el.treePreviewBadge.textContent = 'Đang quét...';
+  el.btnStartOfflineExport.disabled = true;
+
+  try {
+    const pages = await state.client.getSpacePagesOverview(spaceKey);
+    currentPreviewPages = pages;
+
+    el.treePreviewLoading.classList.add('hidden');
+
+    if (!pages || pages.length === 0) {
+      el.treePreviewBadge.textContent = '0 trang';
+      el.treePreviewBody.innerHTML = '<div style="padding:16px; text-align:center; color:#7A869A;">Không tìm thấy trang nào trong Space này hoặc bạn không có quyền xem.</div>';
+      el.btnStartOfflineExport.disabled = true;
+      return;
+    }
+
+    el.treePreviewBadge.textContent = `${pages.length} trang / tài liệu`;
+    el.treePreviewBody.innerHTML = renderPreviewTree(pages);
+    bindPreviewTreeEvents();
+    el.btnStartOfflineExport.disabled = false;
+  } catch (err) {
+    console.error('Lỗi tải danh mục Space:', err);
+    el.treePreviewLoading.classList.add('hidden');
+    el.treePreviewBadge.textContent = 'Lỗi';
+    el.treePreviewBody.innerHTML = `<div style="padding:14px; color:#FF5630;">Lỗi quét danh mục: ${escapeHtml(err.message)}</div>`;
+    el.btnStartOfflineExport.disabled = true;
+  }
+}
+
+function renderPreviewTree(pages) {
+  const pageMap = new Map();
+  pages.forEach((p) => {
+    pageMap.set(p.id, {
+      id: p.id,
+      title: p.title || 'Untitled',
+      ancestors: p.ancestors || [],
+      version: p.version || 1,
+      updatedBy: p.updatedBy || '',
+      children: []
+    });
+  });
+
+  const roots = [];
+  pageMap.forEach((node) => {
+    const parentAncestor = node.ancestors.filter((a) => pageMap.has(a.id)).pop();
+    if (parentAncestor) {
+      pageMap.get(parentAncestor.id).children.push(node);
+      node.parent = pageMap.get(parentAncestor.id);
+    } else {
+      roots.push(node);
+    }
+  });
+
+  function countDescendants(node) {
+    let count = node.children.length;
+    node.children.forEach((c) => {
+      count += countDescendants(c);
+    });
+    return count;
+  }
+
+  function renderNodes(nodes, isRoot = false) {
+    if (!nodes || nodes.length === 0) return '';
+    let html = `<ul class="preview-tree-ul ${isRoot ? 'preview-tree-root' : ''}">`;
+    nodes.forEach((n) => {
+      const hasChildren = n.children && n.children.length > 0;
+      const subCount = hasChildren ? countDescendants(n) : 0;
+      html += `
+        <li class="preview-tree-li" data-title="${escapeHtml(n.title.toLowerCase())}">
+          <div class="preview-node-row">
+            ${hasChildren ? '<span class="preview-toggle-icon">▼</span>' : '<span class="preview-leaf-icon">•</span>'}
+            <span class="preview-node-icon">${hasChildren ? '📁' : '📄'}</span>
+            <span class="preview-node-name ${hasChildren ? 'is-folder' : ''}" title="${escapeHtml(n.title)}">
+              ${escapeHtml(n.title)}
+            </span>
+            ${hasChildren ? `<span class="preview-node-count">${subCount} tài liệu con</span>` : ''}
+            ${n.updatedBy ? `<span style="font-size:11px; color:#7A869A; margin-left:4px;">(${escapeHtml(n.updatedBy)})</span>` : ''}
+          </div>
+          ${hasChildren ? renderNodes(n.children, false) : ''}
+        </li>
+      `;
+    });
+    html += '</ul>';
+    return html;
+  }
+
+  return renderNodes(roots, true);
+}
+
+function bindPreviewTreeEvents() {
+  el.treePreviewBody.querySelectorAll('.preview-toggle-icon').forEach((icon) => {
+    icon.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const li = icon.closest('.preview-tree-li');
+      const subUl = li.querySelector(':scope > .preview-tree-ul');
+      if (subUl) {
+        if (subUl.style.display === 'none') {
+          subUl.style.display = '';
+          icon.textContent = '▼';
+        } else {
+          subUl.style.display = 'none';
+          icon.textContent = '▶';
+        }
+      }
+    });
+  });
+}
+
+function filterPreviewTree(keyword) {
+  const kw = keyword.toLowerCase().trim();
+  el.treePreviewBody.querySelectorAll('.preview-tree-li').forEach((item) => {
+    const title = item.dataset.title || '';
+    if (!kw || title.includes(kw)) {
+      item.style.display = '';
+      let parent = item.parentElement?.closest('.preview-tree-li');
+      while (parent) {
+        parent.style.display = '';
+        parent = parent.parentElement?.closest('.preview-tree-li');
+      }
+    } else {
+      item.style.display = 'none';
+    }
+  });
+}
+
+function toggleAllPreviewNodes(expand) {
+  el.treePreviewBody.querySelectorAll('.preview-tree-ul:not(.preview-tree-root)').forEach((ul) => {
+    ul.style.display = expand ? '' : 'none';
+  });
+  el.treePreviewBody.querySelectorAll('.preview-toggle-icon').forEach((icon) => {
+    icon.textContent = expand ? '▼' : '▶';
   });
 }
 

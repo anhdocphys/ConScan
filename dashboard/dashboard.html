@@ -389,6 +389,36 @@
             <p class="form-hint" id="offlineSpaceHint">Extension sẽ tải trang chủ (home) và toàn bộ các trang con theo đúng cấu trúc thư mục cha - con của Space này.</p>
           </div>
 
+          <!-- Space Tree Confirmation Preview -->
+          <div id="offlineTreePreviewContainer" class="offline-tree-preview-container hidden">
+            <div class="tree-preview-header">
+              <div class="tree-preview-title-box">
+                <span class="tree-preview-title" id="treePreviewTitle">📁 Cấu trúc thư mục & tài liệu:</span>
+                <span class="tree-preview-badge" id="treePreviewBadge">0 trang</span>
+              </div>
+              <div class="tree-preview-actions">
+                <input type="text" id="treePreviewSearch" class="tree-search-input" placeholder="🔍 Lọc tài liệu...">
+                <button type="button" id="btnExpandAllTree" class="btn-text-sm">Mở hết</button>
+                <button type="button" id="btnCollapseAllTree" class="btn-text-sm">Thu gọn</button>
+              </div>
+            </div>
+
+            <!-- Loading Skeleton -->
+            <div id="treePreviewLoading" class="tree-preview-loading hidden">
+              <div class="tree-spinner"></div>
+              <span>Đang quét danh mục các folder và document trong Space...</span>
+            </div>
+
+            <!-- Rendered Tree List -->
+            <div id="treePreviewBody" class="tree-preview-body"></div>
+
+            <div class="tree-preview-footer">
+              <span class="tree-footer-info" id="treeFooterInfo">
+                💡 Hãy kiểm tra danh mục trên để xác nhận đúng nội dung trước khi bấm <strong>"Bắt đầu Tải Xuống"</strong>.
+              </span>
+            </div>
+          </div>
+
           <div class="offline-options-group">
             <label class="checkbox-option">
               <input type="checkbox" id="chkIncludeAttachments" checked>
