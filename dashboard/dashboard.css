@@ -1453,3 +1453,65 @@ body {
   border-color: #DFE1E6;
 }
 
+/* Local Directory Picker Box */
+.offline-dir-picker-box {
+  margin: 16px 0;
+  padding: 12px 14px;
+  background: #F4F5F7;
+  border: 1px solid #DFE1E6;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dir-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dir-picker-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.dir-picker-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #FFFFFF;
+  border: 1px solid #DFE1E6;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.dir-picker-status.has-dir {
+  background: #E3FCEF;
+  border-color: #ABF5D1;
+  color: #006644;
+  font-weight: 600;
+}
+
+.dir-status-icon {
+  font-size: 14px;
+}
+
+.dir-status-text {
+  flex: 1;
+  word-break: break-all;
+  color: var(--text-main);
+}
+
+.dir-picker-status.has-dir .dir-status-text {
+  color: #006644;
+}
+
+.dir-picker-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+

@@ -160,7 +160,10 @@ function initDOMElements() {
     offlineProgressSub: document.getElementById('offlineProgressSub'),
     offlineSuccessDesc: document.getElementById('offlineSuccessDesc'),
     btnStartOfflineExport: document.getElementById('btnStartOfflineExport'),
-    btnDownloadAllDirect: document.getElementById('btnDownloadAllDirect'),
+    btnExportToLocalDir: document.getElementById('btnExportToLocalDir'),
+    btnChooseLocalDir: document.getElementById('btnChooseLocalDir'),
+    dirPickerStatus: document.getElementById('dirPickerStatus'),
+    dirStatusText: document.getElementById('dirStatusText'),
     btnCancelOfflineExport: document.getElementById('btnCancelOfflineExport'),
     btnCloseOfflineExportDone: document.getElementById('btnCloseOfflineExportDone'),
 
@@ -305,8 +308,9 @@ function setupEventListeners() {
   // Offline Exporter Listeners
   el.btnOpenOfflineModal.addEventListener('click', () => openOfflineModal());
   el.btnCloseOfflineModal.addEventListener('click', () => closeOfflineModal());
+  el.btnChooseLocalDir.addEventListener('click', () => chooseLocalDirectory());
+  el.btnExportToLocalDir.addEventListener('click', () => handleExportToLocalDir());
   el.btnStartOfflineExport.addEventListener('click', () => startOfflineExport('zip'));
-  el.btnDownloadAllDirect.addEventListener('click', () => startOfflineExport('direct'));
   el.btnCancelOfflineExport.addEventListener('click', () => cancelOfflineExport());
   el.btnCloseOfflineExportDone.addEventListener('click', () => closeOfflineModal());
 
@@ -1186,6 +1190,7 @@ function getAvatarColor(name = '') {
 
 let offlineExporterCancel = false;
 let currentPreviewPages = [];
+let selectedLocalDirHandle = null;
 
 async function openOfflineModal() {
   el.offlineModal.classList.remove('hidden');
@@ -1193,17 +1198,68 @@ async function openOfflineModal() {
   el.offlineProgressView.classList.add('hidden');
   el.offlineSuccessView.classList.add('hidden');
   el.btnStartOfflineExport.classList.remove('hidden');
+  el.btnExportToLocalDir.classList.remove('hidden');
   el.btnCancelOfflineExport.classList.add('hidden');
   el.btnCloseOfflineExportDone.classList.add('hidden');
+
+  // Reset local directory selection
+  selectedLocalDirHandle = null;
+  if (el.dirPickerStatus) {
+    el.dirPickerStatus.classList.remove('has-dir');
+    el.dirStatusText.textContent = 'Chưa chỉ định (bấm "Lưu vào thư mục máy tính" để chọn)';
+  }
 
   // Reset tree preview
   el.offlineTreePreviewContainer.classList.add('hidden');
   el.treePreviewBody.innerHTML = '';
   el.treePreviewSearch.value = '';
   el.btnStartOfflineExport.disabled = true;
-  el.btnDownloadAllDirect.disabled = true;
+  el.btnExportToLocalDir.disabled = true;
 
   await populateOfflineSpaceSelect();
+}
+
+async function chooseLocalDirectory() {
+  if (!('showDirectoryPicker' in window)) {
+    alert('Trình duyệt của bạn không hỗ trợ File System Access API. Bạn có thể sử dụng chế độ "Nén file ZIP".');
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({
+      mode: 'readwrite'
+    });
+    selectedLocalDirHandle = handle;
+    el.dirPickerStatus.classList.add('has-dir');
+    el.dirStatusText.textContent = `Thư mục đã chọn: ${handle.name}`;
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      console.warn('Lỗi chọn thư mục:', err);
+      alert(`Không thể chọn thư mục: ${err.message}`);
+    }
+  }
+}
+
+async function handleExportToLocalDir() {
+  if (!selectedLocalDirHandle) {
+    if (!('showDirectoryPicker' in window)) {
+      alert('Trình duyệt của bạn không hỗ trợ File System Access API. Bạn có thể sử dụng chế độ "Nén file ZIP".');
+      return;
+    }
+    try {
+      const handle = await window.showDirectoryPicker({
+        mode: 'readwrite'
+      });
+      selectedLocalDirHandle = handle;
+      el.dirPickerStatus.classList.add('has-dir');
+      el.dirStatusText.textContent = `Thư mục đã chọn: ${handle.name}`;
+    } catch (err) {
+      if (err.name === 'AbortError') return; // User cancelled dialog
+      alert(`Không thể chọn thư mục: ${err.message}`);
+      return;
+    }
+  }
+
+  await startOfflineExport('local_dir');
 }
 
 function closeOfflineModal() {
@@ -1240,7 +1296,7 @@ async function onOfflineSpaceSelected() {
   if (!spaceKey) {
     el.offlineTreePreviewContainer.classList.add('hidden');
     el.btnStartOfflineExport.disabled = true;
-    el.btnDownloadAllDirect.disabled = true;
+    el.btnExportToLocalDir.disabled = true;
     return;
   }
 
@@ -1255,7 +1311,7 @@ async function onOfflineSpaceSelected() {
   el.treePreviewTitle.textContent = `📁 Cấu trúc thư mục & tài liệu: ${spaceName}`;
   el.treePreviewBadge.textContent = 'Đang quét...';
   el.btnStartOfflineExport.disabled = true;
-  el.btnDownloadAllDirect.disabled = true;
+  el.btnExportToLocalDir.disabled = true;
 
   try {
     const pages = await state.client.getSpacePagesOverview(spaceKey);
@@ -1267,7 +1323,7 @@ async function onOfflineSpaceSelected() {
       el.treePreviewBadge.textContent = '0 trang';
       el.treePreviewBody.innerHTML = '<div style="padding:16px; text-align:center; color:#7A869A;">Không tìm thấy trang nào trong Space này hoặc bạn không có quyền xem.</div>';
       el.btnStartOfflineExport.disabled = true;
-      el.btnDownloadAllDirect.disabled = true;
+      el.btnExportToLocalDir.disabled = true;
       return;
     }
 
@@ -1275,14 +1331,14 @@ async function onOfflineSpaceSelected() {
     el.treePreviewBody.innerHTML = renderPreviewTree(pages);
     bindPreviewTreeEvents();
     el.btnStartOfflineExport.disabled = false;
-    el.btnDownloadAllDirect.disabled = false;
+    el.btnExportToLocalDir.disabled = false;
   } catch (err) {
     console.error('Lỗi tải danh mục Space:', err);
     el.treePreviewLoading.classList.add('hidden');
     el.treePreviewBadge.textContent = 'Lỗi';
     el.treePreviewBody.innerHTML = `<div style="padding:14px; color:#FF5630;">Lỗi quét danh mục: ${escapeHtml(err.message)}</div>`;
     el.btnStartOfflineExport.disabled = true;
-    el.btnDownloadAllDirect.disabled = true;
+    el.btnExportToLocalDir.disabled = true;
   }
 }
 
@@ -1476,34 +1532,37 @@ async function startOfflineExport(mode = 'zip') {
   el.offlineProgressView.classList.remove('hidden');
   el.offlineSuccessView.classList.add('hidden');
   el.btnStartOfflineExport.classList.add('hidden');
-  el.btnDownloadAllDirect.classList.add('hidden');
+  el.btnExportToLocalDir.classList.add('hidden');
   el.btnCancelOfflineExport.classList.remove('hidden');
   el.btnCloseOfflineExportDone.classList.add('hidden');
 
   setOfflineStep(1);
   el.offlineProgressBarFill.style.width = '5%';
-  el.offlineProgressLabel.textContent = 'Đang khởi tạo tiến trình tải...';
+  el.offlineProgressLabel.textContent = 'Đang khởi tạo tiến trình xuất offline...';
 
   try {
     const exporter = new OfflineSpaceExporter(state.client);
 
-    if (mode === 'direct') {
-      // Direct file-by-file sequential download
-      const result = await exporter.exportAllPagesDirect({
+    if (mode === 'local_dir') {
+      // Export directly into user-selected local directory with physical folder tree
+      const result = await exporter.exportSpaceToDirectoryHandle({
+        dirHandle: selectedLocalDirHandle,
         spaceKey,
         spaceName,
         pages: currentPreviewPages,
         includeAttachments,
-        throttleMs: state.throttleMs || 100,
+        throttleMs: state.throttleMs || 50,
         onProgress: (p) => {
           el.offlineProgressBarFill.style.width = `${p.percent}%`;
           el.offlineProgressLabel.textContent = p.currentText;
 
           if (p.stage === 'FETCHING_PAGES') {
             setOfflineStep(1);
-          } else if (p.stage === 'DOWNLOADING_DIRECT') {
+          } else if (p.stage === 'BUILDING_TREE') {
+            setOfflineStep(2);
+          } else if (p.stage === 'FETCHING_ATTACHMENTS_LIST' || p.stage === 'DOWNLOADING_ASSETS') {
             setOfflineStep(3);
-          } else if (p.stage === 'COMPLETED') {
+          } else if (p.stage === 'CREATING_LOCAL_FILES' || p.stage === 'COMPLETED') {
             setOfflineStep(4);
           }
         },
@@ -1517,7 +1576,8 @@ async function startOfflineExport(mode = 'zip') {
       el.btnCancelOfflineExport.classList.add('hidden');
       el.btnCloseOfflineExportDone.classList.remove('hidden');
 
-      el.offlineSuccessDesc.textContent = `Đã tải xuống thành công ${result.downloadedCount}/${result.totalPages} tài liệu trực tiếp vào thư mục Downloads của bạn.`;
+      const folderPathName = selectedLocalDirHandle?.name ? `${selectedLocalDirHandle.name}/${result.spaceName}` : result.spaceName;
+      el.offlineSuccessDesc.textContent = `Đã tạo đầy đủ các thư mục con và lưu ${result.totalPages} trang HTML cùng ${result.totalAttachments} tệp đính kèm vào thư mục [${folderPathName}].`;
     } else {
       // ZIP bundle download with 100% pages guaranteed
       const result = await exporter.exportSpace({
@@ -1566,13 +1626,13 @@ async function startOfflineExport(mode = 'zip') {
     if (offlineExporterCancel) {
       alert('Đã hủy tiến trình tải offline.');
     } else {
-      alert(`Lỗi khi tải space offline: ${err.message}`);
+      alert(`Lỗi khi xuất space: ${err.message}`);
     }
     // Return to form view
     el.offlineFormView.classList.remove('hidden');
     el.offlineProgressView.classList.add('hidden');
+    el.btnExportToLocalDir.classList.remove('hidden');
     el.btnStartOfflineExport.classList.remove('hidden');
-    el.btnDownloadAllDirect.classList.remove('hidden');
     el.btnCancelOfflineExport.classList.add('hidden');
   }
 }

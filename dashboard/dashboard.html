@@ -414,8 +414,23 @@
 
             <div class="tree-preview-footer">
               <span class="tree-footer-info" id="treeFooterInfo">
-                💡 Bạn có thể bấm <strong>"⬇️ Tải file"</strong> ở từng dòng để tải ngay tài liệu đó, hoặc chọn một trong hai chế độ tải toàn bộ bên dưới.
+                💡 Bạn có thể bấm <strong>"⬇️ Tải file"</strong> ở từng dòng để tải ngay tài liệu đó, hoặc chọn chế độ tải toàn bộ bên dưới.
               </span>
+            </div>
+          </div>
+
+          <!-- Local Directory Picker Target -->
+          <div class="offline-dir-picker-box">
+            <div class="dir-picker-header">
+              <span class="dir-picker-title">📂 Thư mục máy tính để lưu trữ:</span>
+              <button type="button" id="btnChooseLocalDir" class="btn-text-sm">Chỉ định thư mục...</button>
+            </div>
+            <div class="dir-picker-status" id="dirPickerStatus">
+              <span class="dir-status-icon">📁</span>
+              <span class="dir-status-text" id="dirStatusText">Chưa chỉ định (bấm "Lưu vào thư mục máy tính" để chọn)</span>
+            </div>
+            <div class="dir-picker-note">
+              💡 ConScan sẽ tự động tạo các thư mục con theo đúng cấu trúc trang và lưu file HTML vào đúng thư mục con tương ứng.
             </div>
           </div>
 
@@ -458,7 +473,7 @@
             <div class="step-line" id="offlineLine3"></div>
             <div class="step-item" id="offlineStep4">
               <div class="step-circle">4</div>
-              <div class="step-label">Hoàn tất</div>
+              <div class="step-label">Lưu vào máy</div>
             </div>
           </div>
 
@@ -480,9 +495,9 @@
             <div class="instructions-box">
               <strong>📖 Hướng dẫn sử dụng:</strong>
               <ol>
+                <li>Nếu lưu vào thư mục máy tính: Các thư mục con và file HTML đã được tạo đầy đủ trên máy. Bạn có thể mở trực tiếp các thư mục hoặc mở file <code>index.html</code> ở thư mục gốc để xem toàn bộ Space.</li>
                 <li>Nếu tải file ZIP: Giải nén file ZIP vào một thư mục trên máy tính và mở file <code>index.html</code>.</li>
-                <li>Nếu tải từng file: Các tệp HTML đã được lưu trực tiếp vào thư mục Downloads của bạn theo đúng thư mục phân cấp.</li>
-                <li>Bạn có thể mở bất kỳ file HTML nào để xem nội dung offline mà không cần kết nối mạng.</li>
+                <li>Tất cả tài liệu và hình ảnh/tệp đính kèm đều hoạt động 100% offline không cần internet.</li>
               </ol>
             </div>
           </div>
@@ -490,8 +505,8 @@
       </div>
       <div class="modal-footer">
         <button id="btnCancelOfflineExport" class="btn btn-secondary hidden">Hủy tải</button>
-        <button id="btnDownloadAllDirect" class="btn btn-secondary" disabled title="Tải tuần tự từng file HTML lưu vào thư mục Downloads không cần nén ZIP">📥 Tải từng file về máy</button>
-        <button id="btnStartOfflineExport" class="btn btn-primary" disabled title="Đóng gói toàn bộ 100% trang thành file ZIP offline">📦 Tải trọn bộ file ZIP</button>
+        <button id="btnExportToLocalDir" class="btn btn-primary" disabled title="Chỉ định thư mục trên máy tính, tự động tạo thư mục con và lưu file HTML vào đúng thư mục con">📂 Lưu vào thư mục máy tính</button>
+        <button id="btnStartOfflineExport" class="btn btn-secondary" disabled title="Đóng gói toàn bộ 100% trang thành file ZIP offline">📦 Nén file ZIP</button>
         <button id="btnCloseOfflineExportDone" class="btn btn-primary hidden">Đóng</button>
       </div>
     </div>

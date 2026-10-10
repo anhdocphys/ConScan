@@ -305,6 +305,340 @@ export class OfflineSpaceExporter {
   }
 
   /**
+   * Export all pages directly into a user-specified local directory handle,
+   * creating real physical subdirectories matching the page tree structure
+   * and saving HTML files into the matching subdirectories.
+   */
+  async exportSpaceToDirectoryHandle({
+    dirHandle,
+    spaceKey,
+    spaceName = '',
+    pages = null,
+    includeAttachments = true,
+    throttleMs = 50,
+    onProgress = () => {},
+    isCancelled = () => false
+  }) {
+    if (!dirHandle) {
+      throw new Error('Chưa chọn thư mục lưu trên máy tính.');
+    }
+
+    const cleanSpaceName = sanitizeFilename(spaceName || spaceKey);
+    const spaceRoot = cleanSpaceName;
+
+    // 1. Create root Space directory inside chosen dirHandle
+    let spaceDirHandle;
+    try {
+      spaceDirHandle = await dirHandle.getDirectoryHandle(cleanSpaceName, { create: true });
+    } catch {
+      spaceDirHandle = dirHandle;
+    }
+
+    // 2. Get complete list of pages in the space
+    let pageList = pages;
+    if (!pageList || pageList.length === 0) {
+      onProgress({
+        stage: 'FETCHING_PAGES',
+        percent: 5,
+        currentText: `Đang quét toàn bộ danh mục trang trong không gian [${spaceKey}]...`
+      });
+
+      pageList = await this.client.getSpacePagesOverview(spaceKey, (p) => {
+        onProgress({
+          stage: 'FETCHING_PAGES',
+          percent: Math.min(20, 5 + Math.round((p.loaded / 50) * 10)),
+          currentText: `Đã tìm thấy ${p.loaded} trang...`
+        });
+      });
+    }
+
+    if (isCancelled()) throw new Error('Đã hủy tải.');
+
+    if (!pageList || pageList.length === 0) {
+      throw new Error(`Không gian [${spaceKey}] không có trang nào hoặc bạn không có quyền xem.`);
+    }
+
+    // 3. Fetch full body content for each page individually
+    onProgress({
+      stage: 'FETCHING_PAGES',
+      percent: 22,
+      currentText: `Đang tải nội dung chi tiết ${pageList.length} trang...`
+    });
+
+    const pageMap = new Map(); // id -> node
+    const totalPages = pageList.length;
+    const concurrency = 4;
+    let fetchedPagesCount = 0;
+
+    for (let i = 0; i < pageList.length; i += concurrency) {
+      if (isCancelled()) throw new Error('Đã hủy tải.');
+      const batch = pageList.slice(i, i + concurrency);
+
+      await Promise.all(
+        batch.map(async (p) => {
+          let fullData;
+          try {
+            fullData = await this.client.getPageDetailsWithBody(p.id);
+          } catch {
+            fullData = {
+              id: p.id,
+              title: p.title,
+              ancestors: p.ancestors || [],
+              body: { view: { value: '<p><em>Nội dung trang không thể tải được.</em></p>' } }
+            };
+          }
+
+          pageMap.set(p.id, {
+            id: p.id,
+            title: fullData.title || p.title || `Page_${p.id}`,
+            safeTitle: sanitizeFilename(fullData.title || p.title || `Page_${p.id}`),
+            ancestors: fullData.ancestors || p.ancestors || [],
+            raw: fullData,
+            children: [],
+            pathSegments: [],
+            dirPath: '',
+            htmlPath: '',
+            attachments: []
+          });
+
+          fetchedPagesCount++;
+          const pct = 22 + Math.round((fetchedPagesCount / totalPages) * 16);
+          onProgress({
+            stage: 'FETCHING_PAGES',
+            percent: Math.min(38, pct),
+            currentText: `Đã tải nội dung: ${p.title} (${fetchedPagesCount}/${totalPages})...`
+          });
+        })
+      );
+
+      if (throttleMs > 0) {
+        await new Promise((r) => setTimeout(r, throttleMs));
+      }
+    }
+
+    // 4. Build page hierarchy and compute relative directory paths
+    onProgress({
+      stage: 'BUILDING_TREE',
+      percent: 40,
+      currentText: `Đang xây dựng cấu trúc cây thư mục (${pageMap.size} trang)...`
+    });
+
+    const rootNodes = [];
+    pageMap.forEach((node) => {
+      const parentAncestor = node.ancestors.filter((a) => pageMap.has(a.id)).pop();
+      if (parentAncestor) {
+        const parentNode = pageMap.get(parentAncestor.id);
+        parentNode.children.push(node);
+        node.parent = parentNode;
+      } else {
+        rootNodes.push(node);
+      }
+    });
+
+    function computePaths(nodeList, parentPath, parentSegments = []) {
+      const usedNames = new Set();
+      nodeList.forEach((node) => {
+        let name = node.safeTitle;
+        if (usedNames.has(name.toLowerCase())) {
+          name = `${name}_${node.id}`;
+        }
+        usedNames.add(name.toLowerCase());
+        node.folderName = name;
+        node.pathSegments = [...parentSegments, name];
+        node.dirPath = parentPath ? `${parentPath}/${name}` : `${spaceRoot}/${name}`;
+        node.htmlPath = `${node.dirPath}/index.html`;
+
+        if (node.children.length > 0) {
+          computePaths(node.children, node.dirPath, node.pathSegments);
+        }
+      });
+    }
+
+    computePaths(rootNodes, '', []);
+
+    // Safety fallback: ensure 100% of nodes in pageMap have dirPath and pathSegments
+    pageMap.forEach((node) => {
+      if (!node.dirPath || !node.pathSegments || node.pathSegments.length === 0) {
+        node.folderName = `${node.safeTitle}_${node.id}`;
+        node.pathSegments = [node.folderName];
+        node.dirPath = `${spaceRoot}/${node.folderName}`;
+        node.htmlPath = `${node.dirPath}/index.html`;
+        rootNodes.push(node);
+      }
+    });
+
+    // 5. Fetch attachments if requested
+    let totalAttachments = 0;
+    let fetchedAttachments = 0;
+
+    if (includeAttachments) {
+      onProgress({
+        stage: 'FETCHING_ATTACHMENTS_LIST',
+        percent: 45,
+        currentText: 'Đang kiểm tra danh sách tệp đính kèm và hình ảnh...'
+      });
+
+      const allNodesList = Array.from(pageMap.values());
+      for (let i = 0; i < allNodesList.length; i++) {
+        if (isCancelled()) throw new Error('Đã hủy tải.');
+        const node = allNodesList[i];
+
+        try {
+          const attResp = await this.client.getPageAttachments(node.id, 0, 100);
+          const attList = attResp.attachments || [];
+          node.attachments = attList;
+          totalAttachments += attList.length;
+        } catch {}
+
+        if (throttleMs > 0 && i % 5 === 0) {
+          await new Promise((r) => setTimeout(r, throttleMs));
+        }
+      }
+
+      onProgress({
+        stage: 'DOWNLOADING_ASSETS',
+        percent: 50,
+        currentText: `Đang tải ${totalAttachments} tệp đính kèm & hình ảnh...`
+      });
+
+      for (const node of pageMap.values()) {
+        if (isCancelled()) throw new Error('Đã hủy tải.');
+
+        for (const att of node.attachments) {
+          if (isCancelled()) throw new Error('Đã hủy tải.');
+          if (!att.downloadUrl) continue;
+
+          const safeFilename = sanitizeFilename(att.filename || 'attachment');
+          att.localFilename = safeFilename;
+          att.localRelativePath = `./attachments/${safeFilename}`;
+
+          try {
+            const dataUrl = await this.client.requestBinary(att.downloadUrl);
+            att.dataUrl = dataUrl;
+            fetchedAttachments++;
+
+            const pct = 50 + Math.round((fetchedAttachments / Math.max(1, totalAttachments)) * 25);
+            onProgress({
+              stage: 'DOWNLOADING_ASSETS',
+              percent: Math.min(75, pct),
+              currentText: `Đang tải tệp: ${att.filename} (${fetchedAttachments}/${totalAttachments})...`
+            });
+          } catch (err) {
+            console.warn(`Không thể tải tệp ${att.filename}:`, err);
+          }
+
+          if (throttleMs > 0) {
+            await new Promise((r) => setTimeout(r, throttleMs));
+          }
+        }
+      }
+    }
+
+    // 6. Create local subdirectories and write HTML files
+    onProgress({
+      stage: 'CREATING_LOCAL_FILES',
+      percent: 78,
+      currentText: 'Đang mở các thư mục con và lưu file HTML vào máy tính...'
+    });
+
+    let writtenCount = 0;
+    for (const node of pageMap.values()) {
+      if (isCancelled()) throw new Error('Đã hủy tải.');
+
+      // Navigate down and create matching subdirectories
+      let currentDir = spaceDirHandle;
+      for (const segment of node.pathSegments) {
+        currentDir = await currentDir.getDirectoryHandle(segment, { create: true });
+      }
+
+      // Generate offline HTML
+      const pageHtml = renderOfflinePageHtml({
+        node,
+        spaceKey,
+        spaceName,
+        pageMap,
+        spaceRoot
+      });
+
+      // Write page HTML named after the title (e.g. "Quy định bảo mật.html")
+      const pageFileHandle = await currentDir.getFileHandle(`${node.safeTitle}.html`, { create: true });
+      const writable = await pageFileHandle.createWritable();
+      await writable.write(pageHtml);
+      await writable.close();
+
+      // Also write index.html in that subfolder so relative links and local webservers work seamlessly
+      const indexFileHandle = await currentDir.getFileHandle('index.html', { create: true });
+      const indexWritable = await indexFileHandle.createWritable();
+      await indexWritable.write(pageHtml);
+      await indexWritable.close();
+
+      // Write attachments if any
+      if (node.attachments && node.attachments.length > 0) {
+        const attDirHandle = await currentDir.getDirectoryHandle('attachments', { create: true });
+        for (const att of node.attachments) {
+          if (att.dataUrl) {
+            try {
+              const res = await fetch(att.dataUrl);
+              const buffer = await res.arrayBuffer();
+              const attFileHandle = await attDirHandle.getFileHandle(att.localFilename, { create: true });
+              const attWritable = await attFileHandle.createWritable();
+              await attWritable.write(buffer);
+              await attWritable.close();
+            } catch (err) {
+              console.warn(`Lỗi ghi file đính kèm ${att.localFilename}:`, err);
+            }
+          }
+        }
+      }
+
+      writtenCount++;
+      const pct = 78 + Math.round((writtenCount / pageMap.size) * 18);
+      onProgress({
+        stage: 'CREATING_LOCAL_FILES',
+        percent: Math.min(96, pct),
+        currentText: `Đã lưu (${writtenCount}/${pageMap.size}): ${node.pathSegments.join('/')}/${node.safeTitle}.html`
+      });
+    }
+
+    // 7. Write Master Interactive Portal index.html and offline-styles.css at the root of the space
+    onProgress({
+      stage: 'CREATING_LOCAL_FILES',
+      percent: 97,
+      currentText: 'Đang tạo cổng duyệt tương tác (index.html) tại thư mục gốc...'
+    });
+
+    const masterPortalHtml = renderMasterPortalHtml({
+      spaceKey,
+      spaceName,
+      rootNodes,
+      allNodes: Array.from(pageMap.values()),
+      spaceRoot
+    });
+
+    const portalHandle = await spaceDirHandle.getFileHandle('index.html', { create: true });
+    const pWritable = await portalHandle.createWritable();
+    await pWritable.write(masterPortalHtml);
+    await pWritable.close();
+
+    const cssHandle = await spaceDirHandle.getFileHandle('offline-styles.css', { create: true });
+    const cWritable = await cssHandle.createWritable();
+    await cWritable.write(getOfflineCSS());
+    await cWritable.close();
+
+    onProgress({
+      stage: 'COMPLETED',
+      percent: 100,
+      currentText: `✅ Đã lưu thành công ${pageMap.size} trang vào thư mục [${cleanSpaceName}]!`
+    });
+
+    return {
+      spaceName: cleanSpaceName,
+      totalPages: pageMap.size,
+      totalAttachments: fetchedAttachments
+    };
+  }
+
+  /**
    * Export a single page directly as a standalone HTML file
    */
   async exportSinglePage({
