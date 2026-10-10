@@ -18,6 +18,11 @@ Plugin Chrome mạnh mẽ giúp bạn **tự động quét và liệt kê toàn 
   - **Theo Định Dạng:** Lọc nhanh theo nhóm tệp (Hình ảnh, PDF, Word, Excel, Slide, File nén, Code/Dữ liệu).
   - **Tìm kiếm tức thì:** Tìm nhanh theo tên file, tên trang, người upload.
 - 📊 **Thống kê tổng quan:** Thẻ số liệu hiển thị tổng số attachments, tổng dung lượng lưu trữ (MB/GB), số người tải lên, số spaces đã quét.
+- 📦 **Tải toàn bộ Space hoạt động Offline theo đúng cây thư mục:**
+  - Tải tất cả các trang của một Space được chọn xuống máy tính.
+  - Tự động tổ chức cấu trúc thư mục con lồng nhau chính xác theo quan hệ Trang Cha - Trang Con trên Confluence.
+  - Tải kèm toàn bộ **hình ảnh minh họa và tệp đính kèm**, tự động chuyển đổi link để xem offline 100% không cần mạng.
+  - Tạo sẵn file **`index.html` (Interactive Offline Viewer)** có thanh menu cây thư mục, tìm kiếm trang và giao diện đọc bài viết tiện lợi.
 - 💾 **Xuất dữ liệu chuyên nghiệp:**
   - **Xuất CSV:** Chuẩn mã hóa **UTF-8 với BOM** giúp mở bằng Microsoft Excel hiển thị tiếng Việt hoàn hảo, không bị lỗi font.
   - **Xuất JSON:** Phục vụ tích hợp dữ liệu hoặc viết script xử lý tiếp theo.
@@ -69,6 +74,24 @@ Vì đây là extension dạng mã nguồn (Unpacked Extension), bạn có thể
   - Bấm vào các chip phân loại (**PDF**, **Excel**, **Hình ảnh**...) để lọc nhanh loại file.
   - Bấm **"Tải"** để tải file về máy, hoặc bấm **"Trang"** để mở đúng bài viết chứa file đó trên Confluence.
   - Bấm **"Xuất CSV"** hoặc **"Xuất JSON"** ở góc trên bên phải để lưu báo cáo về máy tính.
+
+---
+
+## 📦 Hướng Dẫn Tải Một Space Về Hoạt Động Offline
+
+Nếu bạn cần lưu trữ toàn bộ nội dung của một Space để xem khi không có mạng (offline) hoặc chuyển giao dữ liệu:
+
+1. Bấm vào nút **"📦 Tải Space Offline"** ở góc trên thanh công cụ của Dashboard (hoặc bấm nút này từ Popup tiện ích).
+2. Chọn **Space** bạn muốn tải từ danh sách.
+3. Chọn các tùy chọn:
+   - ☑️ **Tải kèm hình ảnh & tệp đính kèm**: Để các ảnh minh họa, tài liệu trong bài viết được lưu trữ cục bộ.
+   - ☑️ **Tích hợp Cổng Duyệt Tương Tác**: Tự động tạo trang `index.html` tổng hợp.
+4. Bấm **"Bắt đầu Tải Xuống"**.
+5. Sau khi hoàn tất, trình duyệt sẽ tự động tải về file `[Tên_Space]_Offline_Pages.zip`.
+6. **Cách xem offline:**
+   - Giải nén file ZIP.
+   - Mở file `index.html` trong thư mục vừa giải nén: Bạn sẽ thấy giao diện đọc tài liệu với thanh điều hướng cây thư mục bên trái, tìm kiếm trang và nội dung đầy đủ.
+   - Hoặc bạn có thể truy cập vào từng thư mục con theo đúng quan hệ Trang Cha - Trang Con để mở trực tiếp từng bài viết.
 
 ---
 

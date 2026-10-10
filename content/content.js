@@ -125,5 +125,50 @@
 
       return true; // Keep message channel open for async response
     }
+
+    if (message.action === 'CONSCAN_FETCH_BINARY') {
+      const { url, options = {} } = message;
+
+      fetch(url, {
+        method: options.method || 'GET',
+        headers: options.headers || {},
+        credentials: 'include'
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            sendResponse({
+              success: false,
+              status: response.status,
+              statusText: response.statusText
+            });
+            return;
+          }
+
+          const blob = await response.blob();
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            sendResponse({
+              success: true,
+              status: response.status,
+              dataUrl: reader.result,
+              size: blob.size,
+              type: blob.type
+            });
+          };
+          reader.onerror = () => {
+            sendResponse({ success: false, error: 'Failed to read binary blob as data URL' });
+          };
+          reader.readAsDataURL(blob);
+        })
+        .catch((error) => {
+          sendResponse({
+            success: false,
+            status: 0,
+            error: error.message || String(error)
+          });
+        });
+
+      return true;
+    }
   });
 })();

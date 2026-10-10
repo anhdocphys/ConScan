@@ -3,6 +3,7 @@
  */
 
 import { ConfluenceApiClient } from '../shared/confluence-api.js';
+import { OfflineSpaceExporter } from '../shared/offline-exporter.js';
 import {
   formatBytes,
   formatDate,
@@ -134,7 +135,33 @@ function initDOMElements() {
     cfgBaseUrl: document.getElementById('cfgBaseUrl'),
     cfgApiToken: document.getElementById('cfgApiToken'),
     cfgThrottle: document.getElementById('cfgThrottle'),
-    btnSaveSettings: document.getElementById('btnSaveSettings')
+    btnSaveSettings: document.getElementById('btnSaveSettings'),
+
+    // Offline Space Exporter Modal
+    btnOpenOfflineModal: document.getElementById('btnOpenOfflineModal'),
+    offlineModal: document.getElementById('offlineModal'),
+    btnCloseOfflineModal: document.getElementById('btnCloseOfflineModal'),
+    offlineSpaceSelect: document.getElementById('offlineSpaceSelect'),
+    offlineSpaceHint: document.getElementById('offlineSpaceHint'),
+    chkIncludeAttachments: document.getElementById('chkIncludeAttachments'),
+    chkInteractiveViewer: document.getElementById('chkInteractiveViewer'),
+    offlineFormView: document.getElementById('offlineFormView'),
+    offlineProgressView: document.getElementById('offlineProgressView'),
+    offlineSuccessView: document.getElementById('offlineSuccessView'),
+    offlineStep1: document.getElementById('offlineStep1'),
+    offlineStep2: document.getElementById('offlineStep2'),
+    offlineStep3: document.getElementById('offlineStep3'),
+    offlineStep4: document.getElementById('offlineStep4'),
+    offlineLine1: document.getElementById('offlineLine1'),
+    offlineLine2: document.getElementById('offlineLine2'),
+    offlineLine3: document.getElementById('offlineLine3'),
+    offlineProgressLabel: document.getElementById('offlineProgressLabel'),
+    offlineProgressBarFill: document.getElementById('offlineProgressBarFill'),
+    offlineProgressSub: document.getElementById('offlineProgressSub'),
+    offlineSuccessDesc: document.getElementById('offlineSuccessDesc'),
+    btnStartOfflineExport: document.getElementById('btnStartOfflineExport'),
+    btnCancelOfflineExport: document.getElementById('btnCancelOfflineExport'),
+    btnCloseOfflineExportDone: document.getElementById('btnCloseOfflineExportDone')
   };
 }
 
@@ -262,6 +289,13 @@ function setupEventListeners() {
   el.btnSelectAllSpaces.addEventListener('click', () => selectAllSpaces(true));
   el.btnDeselectAllSpaces.addEventListener('click', () => selectAllSpaces(false));
   el.spaceSearchInput.addEventListener('input', (e) => filterSpacesInModal(e.target.value));
+
+  // Offline Exporter Listeners
+  el.btnOpenOfflineModal.addEventListener('click', () => openOfflineModal());
+  el.btnCloseOfflineModal.addEventListener('click', () => closeOfflineModal());
+  el.btnStartOfflineExport.addEventListener('click', () => startOfflineExport());
+  el.btnCancelOfflineExport.addEventListener('click', () => cancelOfflineExport());
+  el.btnCloseOfflineExportDone.addEventListener('click', () => closeOfflineModal());
 }
 
 // ---------------- Confluence Connection ---------------- //
@@ -307,6 +341,8 @@ async function initConfluenceConnection() {
   // If autoStart passed, immediately trigger scan
   if (autoStart === '1') {
     startScanning();
+  } else if (urlParams.get('action') === 'offline') {
+    openOfflineModal();
   }
 }
 
@@ -1125,4 +1161,158 @@ function getAvatarColor(name = '') {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
   return colors[Math.abs(hash) % colors.length];
+}
+
+// ---------------- Offline Space Exporter ---------------- //
+
+let offlineExporterCancel = false;
+
+async function openOfflineModal() {
+  el.offlineModal.classList.remove('hidden');
+  el.offlineFormView.classList.remove('hidden');
+  el.offlineProgressView.classList.add('hidden');
+  el.offlineSuccessView.classList.add('hidden');
+  el.btnStartOfflineExport.classList.remove('hidden');
+  el.btnCancelOfflineExport.classList.add('hidden');
+  el.btnCloseOfflineExportDone.classList.add('hidden');
+
+  await populateOfflineSpaceSelect();
+}
+
+function closeOfflineModal() {
+  if (offlineExporterCancel === false && !el.offlineProgressView.classList.contains('hidden')) {
+    if (!confirm('Quá trình tải đang diễn ra. Bạn có chắc muốn dừng và đóng lại?')) {
+      return;
+    }
+    offlineExporterCancel = true;
+  }
+  el.offlineModal.classList.add('hidden');
+}
+
+async function populateOfflineSpaceSelect() {
+  el.offlineSpaceSelect.innerHTML = '<option value="">-- Đang tải danh sách Spaces... --</option>';
+  const spaces = await loadSpaces();
+  el.offlineSpaceSelect.innerHTML = '<option value="">-- Chọn một Space cần tải --</option>';
+
+  if (spaces.length === 0) {
+    el.offlineSpaceSelect.innerHTML = '<option value="">Không tìm thấy Space nào</option>';
+    return;
+  }
+
+  spaces.forEach((s) => {
+    const opt = document.createElement('option');
+    opt.value = s.key;
+    opt.textContent = `${s.name} (${s.key})`;
+    opt.dataset.spaceName = s.name;
+    el.offlineSpaceSelect.appendChild(opt);
+  });
+}
+
+function setOfflineStep(step) {
+  const steps = [el.offlineStep1, el.offlineStep2, el.offlineStep3, el.offlineStep4];
+  const lines = [el.offlineLine1, el.offlineLine2, el.offlineLine3];
+
+  steps.forEach((s, idx) => {
+    if (idx + 1 < step) {
+      s.className = 'step-item done';
+    } else if (idx + 1 === step) {
+      s.className = 'step-item active';
+    } else {
+      s.className = 'step-item';
+    }
+  });
+
+  lines.forEach((l, idx) => {
+    if (idx + 1 < step) {
+      l.className = 'step-line done';
+    } else {
+      l.className = 'step-line';
+    }
+  });
+}
+
+async function startOfflineExport() {
+  const spaceKey = el.offlineSpaceSelect.value;
+  if (!spaceKey) {
+    alert('Vui lòng chọn một Space cần tải xuống.');
+    return;
+  }
+
+  const selectedOpt = el.offlineSpaceSelect.options[el.offlineSpaceSelect.selectedIndex];
+  const spaceName = selectedOpt.dataset.spaceName || spaceKey;
+  const includeAttachments = el.chkIncludeAttachments.checked;
+
+  offlineExporterCancel = false;
+
+  // Switch to progress view
+  el.offlineFormView.classList.add('hidden');
+  el.offlineProgressView.classList.remove('hidden');
+  el.offlineSuccessView.classList.add('hidden');
+  el.btnStartOfflineExport.classList.add('hidden');
+  el.btnCancelOfflineExport.classList.remove('hidden');
+  el.btnCloseOfflineExportDone.classList.add('hidden');
+
+  setOfflineStep(1);
+  el.offlineProgressBarFill.style.width = '5%';
+  el.offlineProgressLabel.textContent = 'Đang khởi tạo tiến trình xuất offline...';
+
+  try {
+    const exporter = new OfflineSpaceExporter(state.client);
+    const result = await exporter.exportSpace({
+      spaceKey,
+      spaceName,
+      includeAttachments,
+      throttleMs: state.throttleMs || 50,
+      onProgress: (p) => {
+        el.offlineProgressBarFill.style.width = `${p.percent}%`;
+        el.offlineProgressLabel.textContent = p.currentText;
+
+        if (p.stage === 'FETCHING_PAGES') {
+          setOfflineStep(1);
+        } else if (p.stage === 'BUILDING_TREE') {
+          setOfflineStep(2);
+        } else if (p.stage === 'FETCHING_ATTACHMENTS_LIST' || p.stage === 'DOWNLOADING_ASSETS') {
+          setOfflineStep(3);
+        } else if (p.stage === 'GENERATING_HTML' || p.stage === 'GENERATING_PORTAL' || p.stage === 'COMPRESSING') {
+          setOfflineStep(4);
+        }
+      },
+      isCancelled: () => offlineExporterCancel
+    });
+
+    // Trigger download of zip
+    const url = URL.createObjectURL(result.blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = result.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+    // Switch to success view
+    setOfflineStep(5);
+    el.offlineProgressView.classList.add('hidden');
+    el.offlineSuccessView.classList.remove('hidden');
+    el.btnCancelOfflineExport.classList.add('hidden');
+    el.btnCloseOfflineExportDone.classList.remove('hidden');
+
+    el.offlineSuccessDesc.textContent = `Đã tải xuống thành công ${result.totalPages} trang và ${result.totalAttachments} tệp đính kèm.`;
+  } catch (err) {
+    if (offlineExporterCancel) {
+      alert('Đã hủy tiến trình tải offline.');
+    } else {
+      alert(`Lỗi khi tải space offline: ${err.message}`);
+    }
+    // Return to form view
+    el.offlineFormView.classList.remove('hidden');
+    el.offlineProgressView.classList.add('hidden');
+    el.btnStartOfflineExport.classList.remove('hidden');
+    el.btnCancelOfflineExport.classList.add('hidden');
+  }
+}
+
+function cancelOfflineExport() {
+  offlineExporterCancel = true;
+  el.offlineProgressLabel.textContent = 'Đang hủy...';
 }

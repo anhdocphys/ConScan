@@ -119,6 +119,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      if (message.action === 'FETCH_CONFLUENCE_BINARY') {
+        const { tabId, url, options } = message;
+        if (!tabId) {
+          sendResponse({ success: false, error: 'No tabId specified' });
+          return;
+        }
+
+        await ensureContentScript(tabId);
+        const result = await chrome.tabs.sendMessage(tabId, {
+          action: 'CONSCAN_FETCH_BINARY',
+          url,
+          options
+        });
+        sendResponse(result);
+        return;
+      }
+
       sendResponse({ success: false, error: `Unknown action: ${message.action}` });
     } catch (err) {
       sendResponse({ success: false, error: err.message || String(err) });

@@ -53,6 +53,14 @@
             </svg>
             Xuất JSON
           </button>
+          <button id="btnOpenOfflineModal" class="btn btn-primary" title="Tải toàn bộ các trang của một Space về xem offline theo cấu trúc cây thư mục">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+            Tải Space Offline
+          </button>
         </div>
 
         <button id="btnSettings" class="btn btn-ghost" title="Cài đặt">
@@ -354,6 +362,106 @@
       </div>
       <div class="modal-footer">
         <button id="btnSaveSettings" class="btn btn-primary">Lưu cấu hình</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Offline Space Exporter Modal -->
+  <div class="modal-backdrop hidden" id="offlineModal">
+    <div class="modal-box modal-lg">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3 class="modal-title">📦 Tải Space Hoạt Động Offline</h3>
+          <p class="modal-subtitle">Tải toàn bộ các trang theo đúng cấu trúc cây thư mục, tích hợp hình ảnh & cổng duyệt offline</p>
+        </div>
+        <button class="modal-close" id="btnCloseOfflineModal">✕</button>
+      </div>
+      <div class="modal-body">
+        <!-- Initial Form View -->
+        <div id="offlineFormView">
+          <div class="form-group">
+            <label class="form-label" for="offlineSpaceSelect">Chọn Space muốn tải xuống:</label>
+            <div class="select-with-search">
+              <select id="offlineSpaceSelect" class="form-select">
+                <option value="">-- Đang tải danh sách Spaces... --</option>
+              </select>
+            </div>
+            <p class="form-hint" id="offlineSpaceHint">Extension sẽ tải trang chủ (home) và toàn bộ các trang con theo đúng cấu trúc thư mục cha - con của Space này.</p>
+          </div>
+
+          <div class="offline-options-group">
+            <label class="checkbox-option">
+              <input type="checkbox" id="chkIncludeAttachments" checked>
+              <div class="checkbox-content">
+                <strong>Tải kèm hình ảnh & tệp đính kèm</strong>
+                <span>Tải tất cả ảnh minh họa, tài liệu đính kèm để xem được 100% khi không có internet.</span>
+              </div>
+            </label>
+
+            <label class="checkbox-option">
+              <input type="checkbox" id="chkInteractiveViewer" checked>
+              <div class="checkbox-content">
+                <strong>Tích hợp Cổng Duyệt Tương Tác (Offline Viewer)</strong>
+                <span>Tạo sẵn file <code>index.html</code> với thanh điều hướng cây thư mục để dễ dàng duyệt nội dung offline.</span>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- Progress View -->
+        <div id="offlineProgressView" class="hidden">
+          <div class="offline-steps-indicator">
+            <div class="step-item active" id="offlineStep1">
+              <div class="step-circle">1</div>
+              <div class="step-label">Quét trang</div>
+            </div>
+            <div class="step-line" id="offlineLine1"></div>
+            <div class="step-item" id="offlineStep2">
+              <div class="step-circle">2</div>
+              <div class="step-label">Cây thư mục</div>
+            </div>
+            <div class="step-line" id="offlineLine2"></div>
+            <div class="step-item" id="offlineStep3">
+              <div class="step-circle">3</div>
+              <div class="step-label">Tải tệp & ảnh</div>
+            </div>
+            <div class="step-line" id="offlineLine3"></div>
+            <div class="step-item" id="offlineStep4">
+              <div class="step-circle">4</div>
+              <div class="step-label">Nén ZIP</div>
+            </div>
+          </div>
+
+          <div class="offline-progress-box">
+            <div class="offline-progress-label" id="offlineProgressLabel">Đang chuẩn bị tải...</div>
+            <div class="progress-bar-container">
+              <div class="progress-bar-fill" id="offlineProgressBarFill"></div>
+            </div>
+            <div class="offline-progress-sub" id="offlineProgressSub">Vui lòng giữ tab này mở trong khi tải...</div>
+          </div>
+        </div>
+
+        <!-- Completion View -->
+        <div id="offlineSuccessView" class="hidden">
+          <div class="success-banner">
+            <div class="success-icon">🎉</div>
+            <h4 class="success-title">Tải Space Offline Thành Công!</h4>
+            <p class="success-desc" id="offlineSuccessDesc">File ZIP đã được tải xuống máy tính của bạn.</p>
+            <div class="instructions-box">
+              <strong>📖 Hướng dẫn sử dụng:</strong>
+              <ol>
+                <li>Giải nén file ZIP vừa tải về vào một thư mục trên máy tính.</li>
+                <li>Mở file <code>index.html</code> bằng bất kỳ trình duyệt nào để xem toàn bộ Space với cây thư mục.</li>
+                <li>Hoặc bạn có thể truy cập trực tiếp vào từng thư mục theo đúng cấu trúc trang con đã lưu trữ.</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnCancelOfflineExport" class="btn btn-secondary hidden">Hủy tải</button>
+        <button id="btnStartOfflineExport" class="btn btn-primary">Bắt đầu Tải Xuống</button>
+        <button id="btnCloseOfflineExportDone" class="btn btn-primary hidden">Đóng</button>
       </div>
     </div>
   </div>

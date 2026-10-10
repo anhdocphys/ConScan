@@ -119,4 +119,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     window.close();
   });
+
+  // Quick Offline Space Export Button
+  const btnQuickOffline = document.getElementById('btnQuickOffline');
+  if (btnQuickOffline) {
+    btnQuickOffline.addEventListener('click', async () => {
+      await chrome.runtime.sendMessage({
+        action: 'OPEN_DASHBOARD',
+        params: {
+          tabId: selectedTabId,
+          baseUrl: selectedBaseUrl,
+          action: 'offline'
+        }
+      });
+      window.close();
+    });
+  }
 });

@@ -110,6 +110,91 @@ export class ConfluenceApiClient {
   }
 
   /**
+   * Fetch binary asset (image, attachment) as Data URL
+   */
+  async requestBinary(endpoint, options = {}) {
+    let fullUrl = endpoint;
+    if (!endpoint.startsWith('http://') && !endpoint.startsWith('https://')) {
+      const base = this.restBase || (this.baseUrl ? `${this.baseUrl}/rest/api` : '');
+      fullUrl = `${base}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+    }
+
+    if (this.tabId) {
+      const response = await chrome.runtime.sendMessage({
+        action: 'FETCH_CONFLUENCE_BINARY',
+        tabId: this.tabId,
+        url: fullUrl,
+        options
+      });
+
+      if (!response || !response.success) {
+        throw new Error(response?.error || `Không thể tải file: ${fullUrl}`);
+      }
+
+      return response.dataUrl;
+    }
+
+    // Direct fetch
+    const headers = { ...(options.headers || {}) };
+    if (this.apiToken) {
+      if (this.username) {
+        headers['Authorization'] = `Basic ${btoa(`${this.username}:${this.apiToken}`)}`;
+      } else {
+        headers['Authorization'] = `Bearer ${this.apiToken}`;
+      }
+    }
+
+    const res = await fetch(fullUrl, {
+      method: options.method || 'GET',
+      headers,
+      credentials: 'include'
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /**
+   * Fetch all pages in a space with ancestors and full content body
+   */
+  async getAllPagesInSpace(spaceKey, onProgress = null) {
+    if (!this.restBase) await this.detectApiBase();
+
+    const allPages = [];
+    let start = 0;
+    const limit = 50;
+    let hasMore = true;
+
+    while (hasMore) {
+      const endpoint = `/space/${encodeURIComponent(spaceKey)}/content/page?limit=${limit}&start=${start}&expand=ancestors,body.view,body.export_view,version,history,metadata`;
+      const data = await this.request(endpoint);
+      const batch = data.results || [];
+
+      for (const p of batch) {
+        allPages.push(p);
+      }
+
+      if (onProgress) {
+        onProgress({ loaded: allPages.length });
+      }
+
+      if (batch.length < limit || !data._links?.next) {
+        hasMore = false;
+      } else {
+        start += limit;
+      }
+    }
+
+    return allPages;
+  }
+
+  /**
    * Probe and detect whether REST API is at /wiki/rest/api or /rest/api
    */
   async detectApiBase() {
